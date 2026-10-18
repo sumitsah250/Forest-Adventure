@@ -269,6 +269,7 @@ export class Session {
 
   begin(fromSave: boolean): void {
     void this.audio.start();
+    if (!this.testMode) this.touch?.enterImmersive();
     this.audio.setVolume(this.game.settings.masterVolume);
     if (fromSave) this.applySave();
     else {
@@ -443,6 +444,20 @@ export class Session {
       this.hud.setPrompt(t ? { key: 'E', text: t.prompt, progress: t.progress } : null);
       this.hud.setCrosshair(t ? 'target' : 'idle');
     }
+    if (this.touch) {
+      const onFoot = this.mode === 'foot';
+      const t = onFoot && !this.mystery.busy ? this.interactions.current : null;
+      this.touch.update({
+        mode: onFoot ? 'foot' : 'vehicle',
+        prompt: t ? { text: t.prompt, progress: t.progress } : null,
+        radio: this.forcedPrompt,
+        armed: onFoot && this.weapons.owned.size > 0,
+        drawn: onFoot && this.weapons.owned.size > 0 && this.weapons.phase !== 'holstered',
+        needsRecovery: !onFoot && !!this.active?.needsRecovery,
+        flashlight: this.flashlightOn,
+        lights: !!this.active?.lightsOn,
+      });
+    }
     g.camera.getWorldDirection(this.fwd);
     this.compassHeading = (Math.atan2(this.fwd.x, -this.fwd.z) * 180) / Math.PI;
     this.listeners.frame.forEach((f) => f(dt));
@@ -543,7 +558,6 @@ export class Session {
     this.invOpen = wantInv;
     this.hud.setInventory(wantInv);
     if (onFoot && input.pressed('shoulder')) g.player.tpc.side *= -1;
-    this.touch?.setCombat(onFoot && this.weapons.owned.size > 0);
     // Contextual control reminders.
     if (onFoot && this.weapons.owned.size) {
       const drawn = this.weapons.phase !== 'holstered';

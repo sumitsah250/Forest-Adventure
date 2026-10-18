@@ -187,8 +187,8 @@ export class Input {
       if (!this.touchButtons.has(key)) this.touchPressed.add(key);
       this.touchButtons.add(key);
     } else {
+      // A press stays visible until endFrame, so taps shorter than a frame still register.
       this.touchButtons.delete(key);
-      this.touchPressed.delete(key);
       this.touchReleased.add(key);
     }
   }

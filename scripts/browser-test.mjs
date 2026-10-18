@@ -471,6 +471,48 @@ try {
     const moved = Math.hypot(after[0] - before[0], after[2] - before[2]);
     console.log(`touch joystick moved player ${moved.toFixed(2)} m`);
     if (vis === 'none' || moved < 0.5) failed = true;
+    const tapEl = async (sel) => {
+      const c = await page.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+      await page.waitForTimeout(120);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await page.waitForTimeout(400);
+    };
+    // Context button: face the truck's driver door from a couple of metres away.
+    await page.evaluate(() => {
+      const s = window.__session, g = window.__game;
+      const d = s.truck.driverDoorWorld();
+      const p = s.truck.position;
+      const ox = d.x - p.x, oz = d.z - p.z, l = Math.hypot(ox, oz) || 1;
+      const x = d.x + (ox / l) * 1.6, z = d.z + (oz / l) * 1.6;
+      g.player.teleport(x, g.terrain.heightAt(x, z), z, Math.atan2(ox / l, oz / l));
+      g.player.pitch = -0.1;
+    });
+    await page.waitForTimeout(800);
+    const use = await page.evaluate(() => { const b = document.querySelector('.tc-use.shown'); return b ? b.textContent : null; });
+    console.log(`touch context button: ${use ?? 'hidden'}`);
+    await page.screenshot({ path: join(outDir, 'touch-use.png') });
+    // Armed: crouch toggle, then draw and aim through the buttons.
+    await page.evaluate(() => window.__test.wpnSetup());
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(outDir, 'touch-armed.png') });
+    await tapEl('.tc-draw');
+    await page.waitForTimeout(800);
+    const drawn = await page.evaluate(() => window.__session.weapons.phase);
+    console.log(`touch draw -> weapon phase ${drawn}`);
+    if (drawn === 'holstered') failed = true;
+    await tapEl('.tc-aim');
+    await page.screenshot({ path: join(outDir, 'touch-drawn.png') });
+    await tapEl('.tc-aim');
+    // Driving layout.
+    await page.evaluate(() => window.__test.ui('drive'));
+    await tapEl('.tc-lights');
+    const lights = await page.evaluate(() => window.__session.truck.lightsOn);
+    console.log(`touch lights tap -> lights ${lights}`);
+    await page.screenshot({ path: join(outDir, 'touch-vehicle.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: join(outDir, 'touch-portrait.png') });
   } else if (mode === 'ui') {
     await page.waitForTimeout(1500);
     await page.screenshot({ path: join(outDir, 'ui-title.png') });
