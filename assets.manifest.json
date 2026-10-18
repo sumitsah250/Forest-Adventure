@@ -1,0 +1,190 @@
+{
+  "source": "Poly Haven (https://polyhaven.com) - every asset listed here is CC0 (public domain).",
+  "textures": {
+    "forest_leaves_04": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "forrest_ground_03": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "forest_leaves_02": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "mud_forest": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "rocky_trail": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "mossy_rock": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "rock_face_03": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough",
+        "disp"
+      ]
+    },
+    "pine_bark": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "bark_brown_02": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "weathered_planks": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "weathered_plank_siding": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "beam_wall_01": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "old_planks_02": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "brown_planks_04": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "rusty_metal_02": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "rusty_corrugated_iron": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "corrugated_iron_02": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    },
+    "concrete_floor_worn_001": {
+      "maps": [
+        "diff",
+        "nor_gl",
+        "rough"
+      ]
+    }
+  },
+  "foliage": {
+    "fern_02": {
+      "Diffuse": "diff",
+      "Alpha": "alpha",
+      "nor_gl": "nor"
+    },
+    "grass_medium_01": {
+      "Diffuse": "diff",
+      "dry_diff": "dry",
+      "Alpha": "alpha",
+      "nor_gl": "nor"
+    },
+    "shrub_02": {
+      "Diffuse": "diff",
+      "Alpha": "alpha",
+      "nor_gl": "nor"
+    },
+    "shrub_04": {
+      "Diffuse": "diff",
+      "Alpha": "alpha",
+      "nor_gl": "nor"
+    }
+  },
+  "models": [
+    "portable_generator",
+    "metal_jerrycan_green",
+    "vintage_radio_transceiver",
+    "metal_office_desk",
+    "binder_notebook",
+    "office_notepads",
+    "painted_wooden_chair_01",
+    "painted_wooden_cabinet_02",
+    "wooden_picnic_table",
+    "stone_fire_pit",
+    "ammo_box",
+    "bolt_cutters_01",
+    "portable_searchlight",
+    "signal_flashlight",
+    "binoculars",
+    "wooden_crate_02",
+    "barrel_03",
+    "propane_tank",
+    "can_rusted",
+    "power_box_01",
+    "industrial_wall_lamp",
+    "hanging_industrial_lamp",
+    "wall_clock",
+    "metal_toolbox",
+    "worn_metal_rack",
+    "trashbag",
+    "wooden_axe_02"
+  ]
+}
