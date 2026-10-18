@@ -1,0 +1,145 @@
+# Hollow Creek
+
+A third-person forest action-mystery you play in the browser. Ranger Mara Hale stopped answering her radio two
+days ago. Qualify on the district range, drive the old 4x4 into the Hollow Creek valley, read what the forest tells
+you, find her, and then take apart the poaching ring that ran her off the road, across eight missions.
+
+Built with three.js (WebGL 2) and Rapier physics. Everything in the world is generated or assembled at load
+time from code and CC0 photographic assets: terrain, roads, creek, a 10,000-tree forest, buildings, vehicles,
+props and all of the sound.
+
+## Run it
+
+```sh
+npm install
+npm run dev          # http://localhost:5173
+```
+
+For a production build: `npm run build`, then `npm run preview` (http://localhost:4173). The `dist/` folder is a
+static site and can be hosted anywhere.
+
+The game picks a graphics preset on first run: **Low** for integrated or mobile GPUs, **Medium** otherwise. Change
+it in *Settings*. Measured on an Intel Iris Xe laptop GPU at 1280×720: Low runs at about 10–15 ms per frame,
+Medium at about 25–28 ms.
+
+## Controls
+
+| Key | Action |
+|---|---|
+| W A S D | Move (relative to the camera); drive and steer |
+| Mouse | Camera (orbits the truck while driving) |
+| Shift | Sprint; hold breath while scoped |
+| Ctrl or Q | Crouch |
+| Space | Jump; handbrake while driving |
+| Left mouse / right mouse | Fire / aim (over-the-shoulder; the marksman rifle uses its scope) |
+| R | Reload; hold R to recover the truck when it is stuck or on its side |
+| 1–8, mouse wheel | Select or cycle weapons |
+| H | Holster / draw |
+| Tab (hold) | Weapon inventory |
+| V | Swap camera shoulder |
+| E | Interact, pick up, get in and out of the truck (hold for some actions) |
+| F | Flashlight |
+| L / C | Headlights / chase or cockpit camera |
+| T | Radio from the truck (when available) |
+| J / M | Journal (evidence and mission log) / topographic map |
+| Esc | Pause |
+
+On touch screens: left thumbstick, drag on the right half to look, and on-screen buttons (Fire, Aim, Reload,
+Weapon and Holster appear once you carry a gun).
+
+## Missions
+
+1. **Range Day**: collect your sidearm, learn to draw, holster, aim, fire and reload, and qualify on the targets.
+2. **The Silent Station**: search Hale's station, open the gun locker, restore power, hear her last transmission.
+3. **The Lost Patrol**: cross the ford, find Unit 4 and Hale's revolver, deal with the poachers who come back for the
+   wreck, follow the flagging tape to Hale.
+4. **Protect the Ranger Route**: call it in, clear the roadblock on Ridge Road so rescue can reach her.
+5. **The Hidden Supply Cache**: follow the poachers' GPS, read the ground, cut the chain, open the cache.
+6. **Clear the Blocked Route**: pick a loadout, clear the crew holding the ford, winch the felled tree off the track.
+7. **Track the Source**: review the evidence, follow the ATV trail, take the poachers' base camp.
+8. **Final Forest Operation**: stop Dale Kessler's handover to his buyer at the trailhead and arrest him.
+
+### Weapons
+
+| Slot | Weapon | Role | Found |
+|---|---|---|---|
+| 1 | Warden P9 (compact pistol) | Quick, accurate service sidearm | Range lockbox (M1) |
+| 2 | Bridger .44 (heavy revolver) | Six hard-hitting rounds, slow, speedloader | Beside Unit 4 (M3) |
+| 3 | Ranger 12 (pump shotgun) | Decisive inside 15 m, shell-by-shell reload | Station gun locker (M2) |
+| 4 | Vireo SMG | Fast automatic, close/medium | Roadblock truck (M4) |
+| 5 | Marten AR (assault rifle) | All-rounder with red dot | Supply cache (M5) |
+| 6 | Ironwood BR (battle rifle) | Heavy semi-auto 7.62; staggers | Blockade truck (M6) |
+| 7 | Ridgeline .30-06 (hunting rifle) | Bolt-action precision | Lookout tower cab (optional) |
+| 8 | Longwatch DMR (scoped) | 6x scope, long range; Shift steadies | Kessler's camp (M7) |
+
+Poachers who lose a fight surrender (they kneel with their hands on their heads and drop their guns, which you can
+take ammunition from). Your condition regenerates after a few seconds out of fire; if you are downed you wake at
+the mission checkpoint. The truck's lockbox restocks ammunition once per mission.
+
+## What's in the valley
+
+- **Hollow Creek Road**: trailhead with a notice board, an abandoned maroon SUV in the ditch, the ranger station
+  spur, and a collapsed timber bridge.
+- **The ford**: fresh tyre tracks leave the road before the bridge and cross the creek downstream.
+- **Ranger station**: logbook, wall map, key cabinet and a radio with no power. The generator under the lean-to is
+  dry, and there's a jerrycan on your truck.
+- **Ridge Gate and Ridge Road**: a new padlock, a cut chain, and a road climbing along the ravine to the fire
+  lookout.
+- **The ravine**: something went over the edge at the bend. A trail of orange flagging tape leads down the creek
+  to the old Miller cabin.
+- **Off the path**: a hidden camp east of the gate, and the lookout tower with binoculars.
+
+Objectives adapt to the order you find things in. If you make no progress for about three minutes, a context
+hint appears; the journal also offers hints on demand. Progress autosaves; use *Continue* on the title screen.
+
+## Tests
+
+```sh
+npm run typecheck                         # TypeScript
+npm run test:sim                          # headless: terrain, roads, ford, physics, vehicle routes (Node)
+node scripts/browser-test.mjs missions    # all eight missions through real gameplay, to the ending screen
+node scripts/browser-test.mjs play        # the story's interactions, trailhead to the medevac call
+node scripts/browser-test.mjs weapons     # every weapon: draw, aim, fire, reload, ammunition bookkeeping
+node scripts/browser-test.mjs combat      # three poachers: detection, cover, return fire, surrender
+node scripts/browser-test.mjs savegame    # play to Mission 4, save, reload with Continue, compare state
+node scripts/browser-test.mjs poses       # side views of every weapon hold, aim and reload
+node scripts/browser-test.mjs chars       # character showcase: idle, walk, run, sprint, kneel
+node scripts/browser-test.mjs cams        # free-camera views of the forest and mission sites
+node scripts/browser-test.mjs drive       # on the road: enter, accelerate, brake, reverse, turn, exit
+node scripts/browser-test.mjs walk        # climb the lookout stairs, walk into the station
+node scripts/browser-test.mjs shots       # screenshots from scripted viewpoints → test-results/
+node scripts/browser-test.mjs bench       # GPU-synchronised frame cost with subsystems toggled
+node scripts/browser-test.mjs ui          # title, journal, map, driving HUD, cockpit screenshots
+node scripts/browser-test.mjs touch       # touch controls in a phone-sized emulated viewport
+```
+
+The browser tests use the locally installed Chrome or Edge through `playwright-core` (no browser download) and
+start their own Vite server. Add `low`, `medium` or `high` after the mode to choose a preset.
+
+## Assets
+
+`assets.manifest.json` lists every downloaded asset; `node scripts/fetch-assets.mjs` re-downloads them into
+`public/assets/` from Poly Haven. All of them are CC0 (public domain). See [CREDITS.md](CREDITS.md).
+
+## Code map
+
+| Path | What it does |
+|---|---|
+| `src/world/layout.ts` | The designed map: roads, creek, clearings, story sites |
+| `src/world/terrain.ts` | Heightfield: landform, creek carving, road grading, surface data |
+| `src/world/vegetation.ts`, `treeGen.ts` | Forest placement, procedural trees and undergrowth, impostors |
+| `src/world/debris.ts` | Rocks, fallen logs, stumps, branches |
+| `src/world/structures.ts` | Station, bridge, gate, tower, cabin, SUV, wreck, camp, tape trail |
+| `src/render/*` | Terrain shader, atmosphere and fog, foliage atlas and materials, water, models |
+| `src/vehicles/*` | Vehicle physics (Rapier ray-cast vehicle), procedural models, cameras |
+| `src/player/player.ts`, `thirdPersonCamera.ts` | Character controller and third-person camera |
+| `src/character/*` | Procedural skinned humanoid (ranger, poachers) and procedural animation (IK gait, holds) |
+| `src/weapons/*` | Weapon definitions, procedural gun models, weapon system, shared hit detection, effects |
+| `src/game/npc.ts` | Hostile NPCs: perception, cover, firing, surrender |
+| `src/game/missions.ts`, `pickups.ts`, `targets.ts` | The eight missions, pickups, range targets |
+| `src/world/missionSites.ts` | Range, gun locker, roadblock, cache, blockade, base camp, meeting site |
+| `src/game/*` | Session (modes, saving), interactions, the mystery |
+| `src/ui/*` | HUD, menus, journal, map, touch controls |
+| `src/audio/audio.ts` | Procedural WebAudio: ambience, wildlife, footsteps, engine, interactions |
+#   F o r e s t - A d v e n t u r e  
+ 
