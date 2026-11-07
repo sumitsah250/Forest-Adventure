@@ -10,7 +10,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { GROUP, groups, type PhysicsWorld } from '../physics/physics.ts';
 import type { TerrainData, SurfaceKind } from '../world/terrain.ts';
 import type { Input } from '../core/input.ts';
-import { PLAYER_SUIT, createHumanoid, type Humanoid } from '../character/humanoid.ts';
+import { PLAYER_SUIT, createHumanoid, type Humanoid, type Outfit } from '../character/humanoid.ts';
 import { Animator, type HandTargets } from '../character/animator.ts';
 import { ThirdPersonCamera } from './thirdPersonCamera.ts';
 
@@ -94,6 +94,8 @@ export class Player {
   animator: Animator | null = null;
   tpc: ThirdPersonCamera;
   baseFov = 68;
+  /** Half-size of the square the player may walk in (metres from the map centre). */
+  bounds = 286;
   private eyeY = 0;
 
   constructor(physics: PhysicsWorld, terrain: TerrainData, x: number, z: number, yaw: number) {
@@ -128,8 +130,8 @@ export class Player {
   }
 
   /** Creates the visible character (after the scene exists). */
-  attachCharacter(scene: THREE.Scene): void {
-    this.character = createHumanoid(PLAYER_SUIT);
+  attachCharacter(scene: THREE.Scene, outfit: Outfit = PLAYER_SUIT): void {
+    this.character = createHumanoid(outfit);
     scene.add(this.character.root);
     const ground = (x: number, z: number, fromY: number) => this.physics.groundHeight(x, z, fromY) ?? this.terrain.heightAt(x, z);
     this.animator = new Animator(this.character, ground);
@@ -237,7 +239,7 @@ export class Player {
     const t = this.body.translation();
     const next = { x: t.x + mv.x, y: t.y + mv.y, z: t.z + mv.z };
     // Stay inside the playable area.
-    const lim = 286;
+    const lim = this.bounds;
     next.x = THREE.MathUtils.clamp(next.x, -lim, lim);
     next.z = THREE.MathUtils.clamp(next.z, -lim, lim);
     // Safety net: never fall through the terrain.
