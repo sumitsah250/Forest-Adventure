@@ -38,7 +38,7 @@ export const LEVELS: LevelDef[] = [
     id: 'admission',
     title: 'Admission Day',
     place: 'Administration Block',
-    host: { name: 'Mrs. Gurung', role: 'Admission Section', outfit: STAFF.sweater },
+    host: { name: 'Mrs. Gurung', role: 'Admission Section', outfit: STAFF.officer },
     where: { building: 'Addministrative', poi: 'Admission Section', label: 'Administration Block' },
     intro: [
       'Namaste, and welcome to IOE Pashchimanchal Campus!',
@@ -63,7 +63,7 @@ export const LEVELS: LevelDef[] = [
     id: 'library',
     title: 'The Missing Books',
     place: 'WRC Library',
-    host: { name: 'Ms. Baral', role: 'Librarian', outfit: STAFF.coat },
+    host: { name: 'Ms. Baral', role: 'Librarian', outfit: STAFF.librarian },
     where: { building: 'WRC Library' },
     intro: ['Shh — this is a library. But I am glad you are here.'],
     fetch: {

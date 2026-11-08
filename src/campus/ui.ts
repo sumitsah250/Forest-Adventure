@@ -4,6 +4,8 @@
 import { DATA, WORLD_HALF, centroid } from './geo.ts';
 import { shuffled, type Question } from './questions.ts';
 
+const TEST = new URLSearchParams(location.search).has('test');
+
 export interface NavTarget {
   x: number;
   z: number;
@@ -345,6 +347,8 @@ export class CampusUI {
         resolve(result);
       };
       next.onclick = done;
+      // Automated tests read the answer key from the card (test builds only).
+      if (TEST) card.dataset.answer = String(order.indexOf(q.a) + 1);
       card.append(head, hearts);
       if (o.timer) card.append(timerBar);
       card.append(question, opts, feedback, next);

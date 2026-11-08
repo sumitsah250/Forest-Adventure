@@ -237,6 +237,9 @@ export class Screens {
     p.append(t, sub, menu);
     if (this.hooks.continueGame) this.button(menu, 'Continue', this.hooks.continueGame, 'primary');
     this.button(menu, this.hooks.continueGame ? 'New investigation' : 'Begin', this.hooks.begin, this.hooks.continueGame ? '' : 'primary');
+    this.button(menu, 'Campus Quest (IOE Pashchimanchal)', () => {
+      location.href = './campus.html';
+    });
     this.button(menu, 'Settings', () => this.show('settings', 'title'));
     this.button(menu, 'Controls', () => this.show('controls', 'title'));
     this.button(menu, 'Credits', () => this.show('credits', 'title'));

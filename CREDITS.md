@@ -28,6 +28,16 @@ wooden_picnic_table, stone_fire_pit, ammo_box, bolt_cutters_01, portable_searchl
 binoculars, wooden_crate_02, barrel_03, propane_tank, can_rusted, power_box_01, industrial_wall_lamp,
 hanging_industrial_lamp, wall_clock, metal_toolbox, worn_metal_rack, trashbag, wooden_axe_02.
 
+## Campus Quest map data
+
+- Campus and neighbourhood map: © OpenStreetMap contributors, available under the Open Database License
+  (ODbL 1.0): https://www.openstreetmap.org/copyright. Extracted with the Overpass API by
+  `scripts/build-campus-data.mjs` into `src/campus/campusData.json` (a derived database, also ODbL).
+- Elevation: Copernicus DEM GLO-90 (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018,
+  provided under COPERNICUS by the European Union and ESA), via the Open-Meteo elevation API.
+- Institute of Engineering, Tribhuvan University and Pashchimanchal Campus are real institutions; the game is an
+  unofficial fan project. Every host and student in Campus Quest is fictional.
+
 ## Sound
 
 Every sound is synthesised at runtime with the Web Audio API (no recorded samples).

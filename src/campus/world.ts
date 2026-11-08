@@ -537,6 +537,9 @@ function building(
   const r = orientedRect(pts);
   const rectFill = area / (4 * r.hl * r.hw);
   const pitched = (b.roofShape === 'pitched' || workshop || (b.inside && storeys === 1 && area < 400)) && rectFill > 0.8 && r.hw > 1.5;
+  // The roof textures are already mid-grey: a mapped colour such as "grey" (≈0.25 linear)
+  // multiplied on top would read almost black from above, so lift the tint toward white.
+  roofCol.lerp(new THREE.Color(1, 1, 1), pitched ? 0.45 : 0.82);
   if (pitched) hipRoof(B.tin, r, top, roofCol);
   else {
     flatRoof(B.flat, pts, top + 0.02, roofCol);

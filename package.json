@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:sim": "node tests/sim.test.ts",
-    "test:browser": "node scripts/browser-test.mjs"
+    "test:browser": "node scripts/browser-test.mjs",
+    "test:campus": "node scripts/campus-test.mjs play",
+    "campus:data": "node scripts/build-campus-data.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",

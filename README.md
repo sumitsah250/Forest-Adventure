@@ -22,6 +22,29 @@ The game picks a graphics preset on first run: **Low** for integrated or mobile 
 it in *Settings*. Measured on an Intel Iris Xe laptop GPU at 1280×720: Low runs at about 10–15 ms per frame,
 Medium at about 25–28 ms.
 
+## Campus Quest: IOE Pashchimanchal Campus, Pokhara
+
+A second game in the same engine: a walkable, true-to-scale model of the Institute of Engineering,
+Pashchimanchal Campus (Lamachaur, Pokhara), with a ten-level quiz adventure. Open
+http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's title screen).
+
+- **The map is real.** Every building footprint, road, footpath, lawn, sports ground, tree, bench, lamp and
+  statue comes from OpenStreetMap, placed at its true position (a top-down render lines up with the OSM map
+  to within a metre or two). The ground follows the real slope from a Copernicus DEM elevation grid. The
+  surrounding Lamachaur neighbourhood is included, and the Annapurna range with Machhapuchhre stands on the
+  northern horizon.
+- **Ten levels.** Admission Day at the Administration Block, then each department in turn: Applied Science,
+  the WRC Library (find three missing books around campus), Civil (fetch your 28-day concrete cube from the
+  Civil Lab), Electrical (reset the breaker at the Power House), Electronics & Computer (find the lost pen
+  drive), Mechanical (tools from the workshops), Geomatics (a fix at the GNSS test station), the timed Final
+  Exam, and Convocation at the WRC Auditorium.
+- **Quizzes.** Engineering questions per department (options shuffled each time), three lives per test, a
+  short explanation after every answer, streak bonuses, and a results screen with a TU-style division.
+- Gold beacon, compass and a heading-up minimap point the way; **M** opens the full campus map. Progress
+  autosaves. Hosts are fictional characters.
+
+Regenerate the map data with `node scripts/build-campus-data.mjs` (OpenStreetMap Overpass + Open-Meteo).
+
 ## Controls
 
 | Key | Action |
@@ -111,6 +134,8 @@ node scripts/browser-test.mjs shots       # screenshots from scripted viewpoints
 node scripts/browser-test.mjs bench       # GPU-synchronised frame cost with subsystems toggled
 node scripts/browser-test.mjs ui          # title, journal, map, driving HUD, cockpit screenshots
 node scripts/browser-test.mjs touch       # touch controls in a phone-sized emulated viewport
+node scripts/campus-test.mjs play        # Campus Quest: all ten levels through the real UI, to convocation
+node scripts/campus-test.mjs shots       # Campus Quest: title, viewpoints and map → test-results/campus-*.png
 ```
 
 The browser tests use the locally installed Chrome or Edge through `playwright-core` (no browser download) and
@@ -141,5 +166,7 @@ start their own Vite server. Add `low`, `medium` or `high` after the mode to cho
 | `src/game/*` | Session (modes, saving), interactions, the mystery |
 | `src/ui/*` | HUD, menus, journal, map, touch controls |
 | `src/audio/audio.ts` | Procedural WebAudio: ambience, wildlife, footsteps, engine, interactions |
-#   F o r e s t - A d v e n t u r e  
- 
+| `src/campus/*` | Campus Quest: OSM map data, ground, buildings and props, people, levels, questions, UI |
+| `src/character/head.ts` | Sculpted heads, eyes, hair cards, beards and painted faces for all characters |
+
+# Forest-Adventure

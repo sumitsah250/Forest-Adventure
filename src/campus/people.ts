@@ -24,6 +24,10 @@ const STUDENTS: Outfit[] = [
   { ...base, id: 'cq-s4', skin: '#a77352', hair: '#0f0c0a', top: '#4a4f8a', topPattern: 'canvas', trousers: '#5a5246', trouserPattern: 'canvas', boots: '#1e1e1e', headwear: 'none', backpack: '#1f3a2c' },
   { ...base, id: 'cq-s5', skin: '#b98468', hair: '#1c1510', top: '#e0b040', topPattern: 'knit', trousers: '#2c3240', trouserPattern: 'denim', boots: '#f0eee8', headwear: 'none', backpack: null },
   { ...base, id: 'cq-s6', skin: '#94664a', hair: '#15110e', top: '#26282c', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#c43c3c', headwear: 'beanie', headwearColor: '#8a2a2a', backpack: '#22252a' },
+  { ...base, id: 'cq-s7', skin: '#b58262', hair: '#120e0c', top: '#b0475a', topPattern: 'knit', trousers: '#2a3140', trouserPattern: 'denim', boots: '#ecebe6', headwear: 'none', backpack: '#2e2f3a', female: true, hairStyle: 'long' },
+  { ...base, id: 'cq-s8', skin: '#a8724f', hair: '#16110d', top: '#e8e2d2', topPattern: 'knit', trousers: '#3b3f52', trouserPattern: 'twill', boots: '#2a2a2a', headwear: 'none', backpack: null, female: true, hairStyle: 'ponytail' },
+  { ...base, id: 'cq-s9', skin: '#c08d6c', hair: '#1b1410', top: '#3d6b8a', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#f0eee8', headwear: 'none', backpack: '#6a5a3a', female: true, hairStyle: 'bun' },
+  { ...base, id: 'cq-s10', skin: '#9c6a4c', hair: '#120e0b', top: '#2f4f3f', topPattern: 'plaid', trousers: '#2c3646', trouserPattern: 'denim', boots: '#1e1e1e', headwear: 'none', backpack: '#2a2a2e', hairStyle: 'textured', beard: true },
 ];
 
 export const STAFF: Record<string, Outfit> = {
@@ -31,6 +35,8 @@ export const STAFF: Record<string, Outfit> = {
   suitBrown: { ...base, id: 'cq-p2', skin: '#b58262', hair: '#6a6660', top: '#5a4632', topPattern: 'twill', trousers: '#3f3326', trouserPattern: 'twill', boots: '#1a1410', headwear: 'none', backpack: null, suit: true, beard: true },
   suitNavy: { ...base, id: 'cq-p3', skin: '#9c6a4c', hair: '#141110', top: '#23324f', topPattern: 'twill', trousers: '#23324f', trouserPattern: 'twill', boots: '#101010', headwear: 'none', backpack: null, suit: true },
   coat: { ...base, id: 'cq-p4', skin: '#c08d6c', hair: '#1a1410', top: '#e9e9e4', topPattern: 'canvas', trousers: '#3a3c40', trouserPattern: 'twill', boots: '#1a1a1a', headwear: 'none', backpack: null },
+  officer: { ...base, id: 'cq-p6', skin: '#b58262', hair: '#120e0c', top: '#7a2f3a', topPattern: 'knit', trousers: '#2f2a30', trouserPattern: 'twill', boots: '#1a1414', headwear: 'none', backpack: null, female: true, hairStyle: 'bun' },
+  librarian: { ...base, id: 'cq-p7', skin: '#a8724f', hair: '#16110d', top: '#e6e3da', topPattern: 'canvas', trousers: '#3a3c48', trouserPattern: 'twill', boots: '#1a1a1a', headwear: 'none', backpack: null, female: true, hairStyle: 'ponytail' },
   sweater: { ...base, id: 'cq-p5', skin: '#a77352', hair: '#555049', top: '#6a2f3a', topPattern: 'knit', trousers: '#4a4a40', trouserPattern: 'twill', boots: '#2a2018', headwear: 'none', backpack: null, beard: true },
 };
 
@@ -48,13 +54,19 @@ export class Person {
   private dir = 1;
   private speed = range(Math.random, 1.1, 1.45);
   private pause = 0;
+  /** Idle glance target (around the group) and time until the next glance. */
+  private glance = new THREE.Vector3();
+  private glanceT = Math.random() * 3;
+  private hasGlance = false;
   readonly name: string;
 
   constructor(scene: THREE.Scene, outfit: Outfit, ground: CampusGround, physics: PhysicsWorld, x: number, z: number, facing: number, name = '') {
     this.rig = createHumanoid(outfit);
     scene.add(this.rig.root);
-    const groundFn = (gx: number, gz: number, fromY: number) => physics.groundHeight(gx, gz, fromY) ?? ground.heightAt(gx, gz);
-    this.anim = new Animator(this.rig, groundFn);
+    // Feet follow the terrain only: a physics ray would hit the person's own collision
+    // cylinder (hosts have one) and plant the feet on top of it.
+    void physics;
+    this.anim = new Animator(this.rig, (gx: number, gz: number) => ground.heightAt(gx, gz));
     this.pos.set(x, ground.heightAt(x, z), z);
     this.facing = facing;
     this.homeFacing = facing;
@@ -85,6 +97,15 @@ export class Person {
       this.facing += angleDiff(this.facing, want) * (1 - Math.exp(-3 * dt));
     } else if (!this.route) {
       this.facing += angleDiff(this.facing, this.homeFacing) * (1 - Math.exp(-1.5 * dt));
+      // People standing around glance at each other and around them now and then.
+      this.glanceT -= dt;
+      if (this.glanceT <= 0) {
+        this.glanceT = 1.5 + Math.random() * 4;
+        this.hasGlance = Math.random() > 0.25;
+        const a = this.homeFacing + (Math.random() - 0.5) * 2.2;
+        this.glance.set(this.pos.x + Math.sin(a) * 2.5, this.pos.y + 1.4 + Math.random() * 0.4, this.pos.z + Math.cos(a) * 2.5);
+      }
+      if (this.hasGlance) lookAt = this.glance;
     }
     this.anim.update(dt, {
       pos: this.pos, vel: this.vel, facing: this.facing, grounded: true, crouch: 0, sprint: false,
