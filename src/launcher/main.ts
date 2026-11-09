@@ -1,10 +1,12 @@
 // The site's front page and the installed app's home screen.
 //
-// In a browser it only offers to install "Sumix Games"; nothing heavy loads. Opened as
-// the installed app, it downloads every game file to the device once (with progress),
-// then lets the player pick a game, which from then on loads from the device.
+// In a browser it only offers to install the app; nothing heavy loads. Opened as the
+// installed app, it downloads the enabled games' files to the device once (with
+// progress), then offers Play; from then on the games load from the device.
+// Which games are offered is set in src/games.ts.
 
 import './launcher.css';
+import { ENABLED_GAMES as GAMES } from '../games.ts';
 import { canPrompt, initPwa, install, isIos, isStandalone, onInstallChange, wasJustInstalled } from '../pwa.ts';
 
 initPwa();
@@ -14,25 +16,12 @@ interface OfflineList {
   files: [path: string, hash: string, size: number][];
 }
 
-const GAMES = [
-  {
-    href: 'forest.html?source=app',
-    name: 'Poacher Panic',
-    icon: 'icons/forest-512.png',
-    tag: 'Mystery · Open world',
-    blurb: 'A ranger has gone silent near Hollow Creek. Drive in, follow the clues, bring her home.',
-  },
-  {
-    href: 'campus.html?source=app',
-    name: 'Campus Quest',
-    icon: 'icons/campus-512.png',
-    tag: 'Adventure · Quiz',
-    blurb: 'Explore IOE Pashchimanchal Campus, Pokhara. Solve each department’s challenge and graduate.',
-  },
-];
-
 const ASSET_CACHE = 'hc-assets-v1';
 const DONE_KEY = 'sumix.offline.version';
+const single = GAMES.length === 1;
+const appName = single ? GAMES[0].name : 'Sumix Games';
+/** True for files the enabled games need. */
+const wanted = (path: string) => GAMES.some((g) => g.assets.some((a) => (a.endsWith('/') ? path.startsWith(a) : path === a)));
 const params = new URLSearchParams(location.search);
 const appMode = isStandalone() || params.has('app');
 const base = new URL('./', location.href);
@@ -41,7 +30,7 @@ const root = document.getElementById('launcher') as HTMLDivElement;
 root.innerHTML = `
   <main class="lx ${appMode ? 'lx--app' : 'lx--web'}">
     <div class="lx__sky" aria-hidden="true"></div>
-    <header class="lx__brand"><img src="icons/app-192.png" alt="" width="34" height="34" /><span>Sumix Developers</span></header>
+    <header class="lx__brand"><img src="${single ? GAMES[0].icon : 'icons/app-192.png'}" alt="" width="34" height="34" /><span>Sumix Developers</span></header>
     <section class="lx__hero">
       <h1 class="lx__title"></h1>
       <p class="lx__lede"></p>
@@ -84,7 +73,9 @@ for (const a of plays) a.addEventListener('click', (e) => a.getAttribute('aria-d
 async function offlineList(): Promise<OfflineList | null> {
   try {
     const res = await fetch('offline.json', { cache: 'no-cache' });
-    return res.ok ? ((await res.json()) as OfflineList) : null;
+    if (!res.ok) return null;
+    const list = (await res.json()) as OfflineList;
+    return { version: `${list.version}:${GAMES.map((g) => g.id).join(',')}`, files: list.files.filter((f) => wanted(f[0])) };
   } catch {
     return null;
   }
@@ -93,8 +84,13 @@ async function offlineList(): Promise<OfflineList | null> {
 // ------------------------------------------------------------------ browser: install only
 
 function webMode(): void {
-  title.innerHTML = 'Two games.<br /><em>One install.</em>';
-  lede.textContent = 'Install Sumix Games and it downloads both games to your device. After that they open full screen, load fast and play offline.';
+  if (single) {
+    title.innerHTML = `Install<br /><em>${appName}.</em>`;
+    lede.textContent = 'Install it once and it downloads to your device. After that it opens full screen, loads fast and plays offline.';
+  } else {
+    title.innerHTML = 'Two games.<br /><em>One install.</em>';
+    lede.textContent = 'Install Sumix Games and it downloads the games to your device. After that they open full screen, load fast and play offline.';
+  }
   let sizeNote = '';
   void offlineList().then((list) => {
     if (!list) return;
@@ -105,11 +101,11 @@ function webMode(): void {
   const render = () => {
     setPlayable(false);
     if (wasJustInstalled()) {
-      action.innerHTML = `<div class="lx-done"><b>Installed ✓</b> Open <b>Sumix Games</b> from your home screen or app list. It downloads the games the first time it opens.</div>`;
+      action.innerHTML = `<div class="lx-done"><b>Installed ✓</b> Open <b>${appName}</b> from your home screen or app list. It downloads ${single ? 'the game' : 'the games'} the first time it opens.</div>`;
       return;
     }
     if (canPrompt() || isIos) {
-      action.innerHTML = `<button class="lx-btn" type="button">${DOWNLOAD_ICON}<span>${isIos ? 'Install on iPhone / iPad' : 'Install Sumix Games'}</span></button><div class="lx-note">${sizeNote}</div>`;
+      action.innerHTML = `<button class="lx-btn" type="button">${DOWNLOAD_ICON}<span>${isIos ? 'Install on iPhone / iPad' : `Install ${appName}`}</span></button><div class="lx-note">${sizeNote}</div>`;
       (action.querySelector('button') as HTMLButtonElement).onclick = () => void install().then(render);
       return;
     }
@@ -120,7 +116,7 @@ function webMode(): void {
     action.innerHTML = `
       <div class="lx-note lx-note--box">
         <b>Can’t install from this browser.</b> Open this page in <b>Chrome</b> or <b>Edge</b> (Android, Windows, Mac) or <b>Safari</b> (iPhone, iPad).
-        Already installed? Open <b>Sumix Games</b> from your apps.
+        Already installed? Open <b>${appName}</b> from your apps.
       </div>
       <button class="lx-link" type="button">Play in the browser instead</button>`;
     (action.querySelector('.lx-link') as HTMLButtonElement).onclick = () => {
@@ -148,13 +144,13 @@ function appMode_(): void {
       </div>`;
   };
   const ready = () => {
-    title.innerHTML = 'Pick a game.';
-    lede.textContent = 'Everything is on your device. Games load from here, even without internet.';
-    action.innerHTML = `<div class="lx-done"><b>Ready to play ✓</b> Both games are downloaded.</div>`;
+    title.innerHTML = single ? 'Ready to<br /><em>play.</em>' : 'Pick a game.';
+    lede.textContent = single ? `${appName} is on your device. It loads from here, even without internet.` : 'Everything is on your device. Games load from here, even without internet.';
+    action.innerHTML = `<div class="lx-done"><b>Downloaded ✓</b> ${single ? 'Tap Play to start.' : 'All games are on this device.'}</div>`;
     setPlayable(true);
   };
 
-  title.innerHTML = 'Getting your<br /><em>games ready.</em>';
+  title.innerHTML = single ? `Getting ${appName}<br /><em>ready.</em>` : 'Getting your<br /><em>games ready.</em>';
   lede.textContent = 'A one-time download. Keep the app open until it finishes; next time it opens straight away.';
   setPlayable(false, 'Downloading…');
   panel();
@@ -219,7 +215,7 @@ async function downloadAll(): Promise<void> {
       requestAnimationFrame(paint);
     }
   };
-  state.textContent = missing.length ? 'Downloading games' : 'Checking files';
+  state.textContent = missing.length ? (single ? `Downloading ${appName}` : 'Downloading games') : 'Checking files';
   paint();
 
   let next = 0;
