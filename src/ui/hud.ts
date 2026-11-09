@@ -20,6 +20,11 @@ export class Hud {
   private objective: HTMLDivElement;
   private objectiveText: HTMLDivElement;
   private objectiveSub: HTMLDivElement;
+  private objectiveHint: HTMLDivElement;
+  private objectiveHintText: HTMLDivElement;
+  private objectiveKeys: HTMLDivElement;
+  private waypoint: HTMLDivElement;
+  private waypointLabel: HTMLDivElement;
   private compass: HTMLDivElement;
   private compassStrip: HTMLDivElement;
   private compassMarker: HTMLDivElement;
@@ -78,7 +83,18 @@ export class Hud {
     label.textContent = 'Objective';
     this.objectiveText = el('div', 'hud-objective-text');
     this.objectiveSub = el('div', 'hud-objective-sub');
-    this.objective.append(label, this.objectiveText, this.objectiveSub);
+    this.objectiveHint = el('div', 'hud-objective-hint');
+    const hintLabel = el('div', 'hud-objective-hint-label');
+    hintLabel.textContent = 'Hint';
+    this.objectiveHintText = el('div', 'hud-objective-hint-text');
+    this.objectiveHint.append(hintLabel, this.objectiveHintText);
+    this.objectiveKeys = el('div', 'hud-objective-keys');
+    this.objective.append(label, this.objectiveText, this.objectiveSub, this.objectiveHint, this.objectiveKeys);
+    // Objective waypoint: a marker over the target with its distance; pinned to the
+    // screen edge with an arrow when the target is off screen or behind the camera.
+    this.waypoint = el('div', 'hud-waypoint');
+    this.waypointLabel = el('div', 'hud-wp-label');
+    this.waypoint.append(el('div', 'hud-wp-arrow'), el('div', 'hud-wp-diamond'), this.waypointLabel);
     this.compass = el('div', 'hud-compass');
     this.compassStrip = el('div', 'hud-compass-strip');
     this.compassMarker = el('div', 'hud-compass-marker');
@@ -138,7 +154,7 @@ export class Hud {
     this.controls = el('div', 'hud-controls');
     this.mission = el('div', 'hud-mission');
     this.fade = el('div', 'hud-fade');
-    this.root.append(this.scope, this.dmgVignette, this.dmgArrow, this.compass, this.mission, this.objective, this.crosshair, this.hitMark, this.prompt, this.subtitle, this.toasts, this.vehicle, this.weapon, this.healthWrap, this.controls, this.inventory, this.notice, this.fps, this.fade);
+    this.root.append(this.scope, this.dmgVignette, this.dmgArrow, this.waypoint, this.compass, this.mission, this.objective, this.crosshair, this.hitMark, this.prompt, this.subtitle, this.toasts, this.vehicle, this.weapon, this.healthWrap, this.controls, this.inventory, this.notice, this.fps, this.fade);
     this.setPrompt(null);
     this.setVehicle(null);
     this.setWeapon(null);
@@ -311,7 +327,11 @@ export class Hud {
     this.crosshairMode = 'none';
   }
 
-  setObjective(text: string | null, sub = ''): void {
+  /**
+   * Objective panel. `hint` shows a hint box under the objective (null hides it);
+   * `hintKey` is the key-chip line under it ("G  Hint"), null hides it.
+   */
+  setObjective(text: string | null, sub = '', help: { hint?: string | null; hintKey?: string | null } = {}): void {
     if (!text) {
       this.objective.classList.remove('visible');
       return;
@@ -323,6 +343,51 @@ export class Hud {
     this.objective.classList.add('visible');
     this.objectiveText.textContent = text;
     this.objectiveSub.textContent = sub;
+    const hint = help.hint ?? '';
+    if (this.objectiveHintText.textContent !== hint) {
+      this.objectiveHintText.textContent = hint;
+      // Replay the highlight whenever a new hint appears.
+      this.objectiveHint.classList.remove('fresh');
+      void this.objectiveHint.offsetWidth;
+      if (hint) this.objectiveHint.classList.add('fresh');
+    }
+    this.objectiveHint.classList.toggle('visible', !!hint);
+    const keys = help.hintKey ? `<b>G</b>${help.hintKey}` : '';
+    if (this.objectiveKeys.innerHTML !== keys) this.objectiveKeys.innerHTML = keys;
+  }
+
+  /**
+   * Objective waypoint from the target's normalised device coordinates (camera
+   * projection). `behind` = the target is behind the camera. Null hides it.
+   */
+  setWaypoint(w: { ndcX: number; ndcY: number; behind: boolean; label: string; opacity: number } | null): void {
+    if (!w || w.opacity <= 0.01) {
+      this.waypoint.classList.remove('visible');
+      return;
+    }
+    const W = this.root.clientWidth || window.innerWidth;
+    const H = this.root.clientHeight || window.innerHeight;
+    let x = w.behind ? -w.ndcX : w.ndcX;
+    let y = w.behind ? -w.ndcY : w.ndcY;
+    if (w.behind && Math.abs(x) < 1e-3 && Math.abs(y) < 1e-3) y = -1;
+    // Keep clear of the screen edges (and the compass at the top).
+    const mx = 1 - 60 / (W / 2);
+    const my = y > 0 ? 1 - 84 / (H / 2) : 1 - 70 / (H / 2);
+    const over = Math.max(Math.abs(x) / mx, Math.abs(y) / my);
+    const off = w.behind || over > 1;
+    if (off) {
+      x /= over;
+      y /= over;
+    }
+    const px = ((x + 1) / 2) * W;
+    const py = ((1 - y) / 2) * H;
+    this.waypoint.classList.add('visible');
+    this.waypoint.classList.toggle('off', off);
+    this.waypoint.style.opacity = String(w.opacity);
+    this.waypoint.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px)`;
+    const ang = Math.atan2(py - H / 2, px - W / 2);
+    this.waypoint.style.setProperty('--wp-angle', `${ang.toFixed(3)}rad`);
+    if (this.waypointLabel.textContent !== w.label) this.waypointLabel.textContent = w.label;
   }
 
   toast(title: string, body = '', kind: 'clue' | 'info' | 'hint' | 'objective' = 'info'): void {

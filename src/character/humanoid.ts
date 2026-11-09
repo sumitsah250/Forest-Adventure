@@ -1151,6 +1151,8 @@ export interface Humanoid {
   mesh: THREE.SkinnedMesh;
   bones: Record<BoneName, THREE.Bone>;
   outfit: Outfit;
+  /** Bind-pose joint positions (character space) the animator poses this rig from. */
+  joints: Readonly<Record<BoneName, readonly [number, number, number]>>;
 }
 
 /** Creates one character instance (own skeleton, shared geometry/materials). */
@@ -1184,5 +1186,5 @@ export function createHumanoid(outfit: Outfit): Humanoid {
   mesh.name = `character-${outfit.id}`;
   const root = new THREE.Group();
   root.add(mesh);
-  return { root, mesh, bones, outfit };
+  return { root, mesh, bones, outfit, joints: JOINTS };
 }

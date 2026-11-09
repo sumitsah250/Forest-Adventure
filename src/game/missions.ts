@@ -23,6 +23,7 @@ import type { NpcGroup, NpcSpec, Npc } from './npc.ts';
 import { Pickups } from './pickups.ts';
 import { PaperTargetHit, PlateTarget } from './targets.ts';
 import { WEAPONS, type AmmoType } from '../weapons/defs.ts';
+import { MISSION_HINTS } from './missionHints.ts';
 
 interface ObjectiveDef {
   id: string;
@@ -31,7 +32,8 @@ interface ObjectiveDef {
   target?: () => THREE.Vector3 | null | undefined;
   done: () => boolean;
   onStart?: () => void;
-  hints?: string[];
+  /** Computed hints (steps whose advice depends on progress); otherwise MISSION_HINTS[id]. */
+  hints?: () => string[];
 }
 
 interface MissionDef {
@@ -546,8 +548,7 @@ export class Missions {
           setTimeout(() => this.say(DISPATCH_INTRO), 1800);
         },
         objectives: [
-          { id: 'm1-take', text: 'Collect your sidearm from the range lockbox', sub: 'Follow the footpath east from the trailhead lot.', target: () => a.lockbox, done: () => w.has('p9'),
-            hints: ['The range is just east of the trailhead lot. The lockbox sits on the shooting bench.', 'Walk to the bench at the end of the footpath, hold E at the lockbox, then take the pistol.'] },
+          { id: 'm1-take', text: 'Collect your sidearm from the range lockbox', sub: 'Follow the footpath east from the trailhead lot.', target: () => a.lockbox, done: () => w.has('p9') },
           { id: 'm1-draw', text: 'Draw your pistol', sub: 'Press 1 or H.', done: () => w.current === 'p9' && w.phase === 'ready' },
           { id: 'm1-holster', text: 'Holster it, then draw it again', sub: 'H puts it away; press H again to draw.', done: () => this.stepFlags.has('holstered') && w.phase === 'ready' },
           { id: 'm1-aim', text: 'Aim at a steel plate', sub: 'Hold the right mouse button. The crosshair turns red on a target.', target: () => this.sites.plates[0]?.center, done: () => this.stepFlags.has('aimedPlate') },
@@ -569,13 +570,17 @@ export class Missions {
         brief: 'Hale\'s station has been dark for two days. Find out why.',
         checkpoint: cp(50, 4, -1.3),
         objectives: [
-          { id: 'm2-reach', text: 'Drive to Hollow Creek Ranger Station', sub: 'Your truck is in the trailhead lot. Follow the road north.', target: () => st.stationDoor, done: () => m.has('stationReached'),
-            hints: ['Follow Hollow Creek Road north. The station spur is on the right, past the abandoned SUV.'] },
-          { id: 'm2-logbook', text: 'Search the station: find Hale\'s logbook', target: () => st.logbook, done: () => m.has('logbook'),
-            hints: ['The logbook is on the metal desk against the back wall, inside the door.'] },
-          { id: 'm2-locker', text: 'Open the station gun locker', sub: 'Combination 4-1-7, from the back of Hale\'s logbook.', target: () => a.locker, done: () => w.has('ranger12'),
-            hints: ['The green steel locker stands against the left wall by the front window. Hold E to dial, then take the shotgun.'] },
-          { id: 'm2-power', text: 'Get the station radio working', sub: () => (story().key === 'generator' ? story().sub : 'Restore power to the station.'), target: () => (story().key === 'generator' ? story().target : st.generator), done: () => m.has('powerOn') },
+          { id: 'm2-reach', text: 'Drive to Hollow Creek Ranger Station', sub: 'Your truck is in the trailhead lot. Follow the road north.', target: () => st.stationDoor, done: () => m.has('stationReached') },
+          { id: 'm2-logbook', text: 'Search the station: find Hale\'s logbook', target: () => st.logbook, done: () => m.has('logbook') },
+          { id: 'm2-locker', text: 'Open the station gun locker', sub: 'Combination 4-1-7, from the back of Hale\'s logbook.', target: () => a.locker, done: () => w.has('ranger12') },
+          { id: 'm2-power', text: 'Get the station radio working', sub: () => (story().key === 'generator' ? story().sub : 'Restore power to the station.'), target: () => (story().key === 'generator' ? story().target : st.generator), done: () => m.has('powerOn'),
+            hints: () => {
+              if (!m.has('generatorChecked')) return ['The radio needs power. The generator is under the lean-to outside the station.', 'Walk round to the lean-to, look at the generator and press E.'];
+              if (!m.has('generatorFueled') && !m.has('hasFuel')) return ['The generator is dry. Your truck carries a green jerrycan on its roof rack.', 'Walk to your truck, look up at the roof rack and press E to take the jerrycan, then carry it to the generator.'];
+              if (!m.has('generatorFueled')) return ['Take the jerrycan to the generator under the lean-to.', 'Look at the generator and press E to pour in the fuel.'];
+              if (!m.has('generatorRunning')) return ['The generator has fuel now. Start it.', 'Look at the generator and press E to pull the starter.'];
+              return ['The generator is running. Send its power to the station.', 'The power box is on the station wall near the generator. Look at it and press E to throw the transfer switch.'];
+            } },
           { id: 'm2-radio', text: 'Play Hale\'s last transmission', target: () => st.radio, done: () => m.has('heardRecording') },
           { id: 'm2-key', text: 'Take the spare Ridge Gate key', target: () => st.keyCabinet, done: () => m.has('hasKey') },
           { id: 'm2-leave', text: 'Head for the ford', sub: 'The bridge is out. Hale said: take the ford.', target: () => st.bridgeTracks, done: () => this.you.distanceTo(new THREE.Vector3(station.x, this.you.y, station.z)) > 70 },
@@ -631,9 +636,11 @@ export class Missions {
         objectives: [
           { id: 'm5-map', text: 'Check the GPS waypoint on your map', sub: 'Press M.', done: () => (this.screensOpened.get('map') ?? -1) >= this.missionDoneAt },
           { id: 'm5-search', text: 'Search the woods around the waypoint', sub: 'East of the hidden camp, off the ATV trail.', target: () => a.cache, done: () => this.near(a.cache, 24) },
-          { id: 'm5-entrance', text: 'Find the cache entrance', sub: 'Look for boot prints, drag marks, anything cut or piled up.', target: () => (this.near(a.cache, 12) ? a.cacheHatch : null), done: () => this.flags.has('branches'),
-            hints: ['Boot prints leave the ATV trail. Follow them to a pile of cut branches.', 'The pile of branches beside the orange-marked stake hides the entrance. Hold E to pull them aside.'] },
-          { id: 'm5-chain', text: 'Get past the padlocked chain', sub: () => (this.flags.has('cutters') ? 'Cut it with the bolt cutters.' : 'Bolt cutters would do it. The hidden camp by the gate had a pair.'), target: () => (this.flags.has('cutters') ? a.cacheHatch : st.boltCutters), done: () => this.flags.has('chainCut') },
+          { id: 'm5-entrance', text: 'Find the cache entrance', sub: 'Look for boot prints, drag marks, anything cut or piled up.', target: () => (this.near(a.cache, 12) ? a.cacheHatch : null), done: () => this.flags.has('branches') },
+          { id: 'm5-chain', text: 'Get past the padlocked chain', sub: () => (this.flags.has('cutters') ? 'Cut it with the bolt cutters.' : 'Bolt cutters would do it. The hidden camp by the gate had a pair.'), target: () => (this.flags.has('cutters') ? a.cacheHatch : st.boltCutters), done: () => this.flags.has('chainCut'),
+            hints: () => (this.flags.has('cutters')
+              ? ['You have the bolt cutters. Go back to the hatch.', 'Look at the padlocked chain on the hatch and hold E to cut it.']
+              : ['You need bolt cutters. The hidden camp near Ridge Gate had a pair.', 'Follow the marker to the hidden camp, press E to take the bolt cutters, then come back to the hatch.']) },
           { id: 'm5-open', text: 'Open the hatch', target: () => a.cacheHatch, done: () => this.flags.has('hatchOpen') },
           { id: 'm5-take', text: 'Take the rifle and read the ledger', target: () => a.cacheRifle, done: () => w.has('marten') && m.hasClue('ledger') },
         ],
@@ -861,7 +868,7 @@ export class Missions {
     const o = this.defs[this.index]?.objectives[this.step];
     if (!o) return null;
     const sub = typeof o.sub === 'function' ? o.sub() : o.sub ?? '';
-    return { key: o.id, text: o.text, sub, target: o.target?.() ?? null, hints: o.hints };
+    return { key: o.id, text: o.text, sub, target: o.target?.() ?? null, hints: o.hints?.() ?? MISSION_HINTS[o.id] };
   }
 
   private animateParts(dt: number): void {

@@ -8,6 +8,7 @@ import { PLAYER_SUIT, POACHER_OUTFITS, RANGER, createHumanoid } from '../charact
 import type { WeaponId } from '../weapons/defs.ts';
 import { runMissions } from './missionTest.ts';
 import { Animator } from '../character/animator.ts';
+import { createPlayerHumanoid } from '../character/playerModel.ts';
 import { buildWeaponModel } from '../weapons/models.ts';
 import { WEAPON_ORDER } from '../weapons/defs.ts';
 
@@ -45,7 +46,7 @@ export function installTestHooks(game: Game, session: Session, extra: Record<str
       const outfits = [PLAYER_SUIT, RANGER, ...POACHER_OUTFITS];
       const ground = (x: number, z: number) => game.terrain.heightAt(x, z);
       w.__show = outfits.map((of, i) => {
-        const h = createHumanoid(of);
+        const h = of === PLAYER_SUIT ? createPlayerHumanoid(of) : createHumanoid(of);
         game.scene.add(h.root);
         const x0 = 58 + i * (o.spacing ?? 1.4);
         const z = 228;

@@ -154,7 +154,7 @@ for (const e of all) {
   }
   if (t.highway && e.type === 'way' && e.geometry) {
     const area = t.area === 'yes' || (closed(e.geometry) && t.highway === 'pedestrian');
-    out.lines.push({ kind: t.highway, pts: e.geometry.map(toLocal), w: LINE_WIDTH[t.highway] ?? 3, ...(t.surface ? { surface: t.surface } : {}), ...(t.name ? { name: t['name:en'] || t.name } : {}), ...(area ? { area: true } : {}) });
+    out.lines.push({ kind: t.highway, pts: e.geometry.map(toLocal), w: LINE_WIDTH[t.highway] ?? 3, ...(t.surface ? { surface: t.surface } : {}), ...(t.name ? { name: t['name:en'] || t.name } : {}), ...(area ? { area: true } : {}), ...(t.tunnel === 'yes' || t.tunnel === 'building_passage' || t.covered === 'yes' ? { tunnel: true } : {}) });
     continue;
   }
   if (t.barrier === 'fence' || t.barrier === 'wall' || t.man_made === 'wall' || t.man_made === 'wal') {

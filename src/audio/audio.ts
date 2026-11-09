@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import type { SfxApi } from '../game/mystery.ts';
 import type { GunSound } from '../weapons/defs.ts';
+import { seededRandom, synthGunshot } from './gunshotSynth.ts';
 
 export type GunMech =
   | 'magOut' | 'magIn' | 'slideRack' | 'slideRelease' | 'dry' | 'pumpBack' | 'pumpForward'
@@ -159,13 +160,22 @@ export class AudioEngine implements SfxApi {
     p.refDistance = ref;
     p.rolloffFactor = rolloff;
     p.maxDistance = 400;
-    if (pos) this.setPos(p, pos);
+    if (pos) this.setPos(p, pos, true);
     return p;
   }
 
-  private setPos(p: PannerNode, v: THREE.Vector3): void {
+  /**
+   * Moves a source. `immediate` places a new source at once: gliding from the
+   * world origin would leave one-shots (gunshots, clicks, impacts) far away and
+   * near silent for their first ~100 ms, which is all of a transient.
+   */
+  private setPos(p: PannerNode, v: THREE.Vector3, immediate = false): void {
     const t = this.ctx.currentTime;
-    if (p.positionX) {
+    if (p.positionX && immediate) {
+      p.positionX.value = v.x;
+      p.positionY.value = v.y;
+      p.positionZ.value = v.z;
+    } else if (p.positionX) {
       p.positionX.setTargetAtTime(v.x, t, 0.03);
       p.positionY.setTargetAtTime(v.y, t, 0.03);
       p.positionZ.setTargetAtTime(v.z, t, 0.03);
@@ -684,10 +694,36 @@ export class AudioEngine implements SfxApi {
 
   // ------------------------------------------------------------ firearms
 
+  /** Pre-rendered takes per gun (see gunshotSynth.ts). */
+  private gunTakes = new WeakMap<GunSound, AudioBuffer[]>();
+  private takeIndex = 0;
+
+  /** Renders every gun's takes up front (during loading) so the first shot doesn't hitch. */
+  prepareGuns(sounds: GunSound[]): void {
+    for (const s of sounds) this.takes(s);
+  }
+
+  private takes(snd: GunSound): AudioBuffer[] {
+    let list = this.gunTakes.get(snd);
+    if (!list) {
+      list = [];
+      const sr = this.ctx.sampleRate;
+      for (let k = 0; k < 3; k += 1) {
+        const data = synthGunshot(snd, sr, seededRandom(1013 + k * 7919 + Math.round(snd.body * 13)));
+        const buf = this.ctx.createBuffer(1, data.length, sr);
+        buf.getChannelData(0).set(data);
+        list.push(buf);
+      }
+      this.gunTakes.set(snd, list);
+    }
+    return list;
+  }
+
   /**
-   * One gunshot. Layers: supersonic crack, body thump at the gun's own
-   * frequency, low boom, and a long tail into the reverb and valley echo.
-   * Distant shots arrive later (speed of sound) and lose their highs.
+   * One gunshot: a pre-rendered take (crack, muzzle blast, body, thump, ground
+   * reflection, tree-line slaps and forest tail) placed in the world. Distant
+   * shots arrive later (speed of sound), lose their highs, and roll down the
+   * valley as an echo.
    */
   gunshot(snd: GunSound, pos: THREE.Vector3, shooterIsPlayer: boolean): void {
     if (!this.started) return;
@@ -696,23 +732,28 @@ export class AudioEngine implements SfxApi {
     const delay = shooterIsPlayer ? 0 : Math.min(0.6, dist / 343);
     const t = c.currentTime + 0.005 + delay;
     const out = c.createGain();
-    out.gain.value = snd.level * (shooterIsPlayer ? 0.9 : 1.1);
+    out.gain.value = snd.level * (shooterIsPlayer ? 1.0 : 1.2);
     const air = c.createBiquadFilter();
     air.type = 'lowpass';
-    air.frequency.value = Math.max(900, 16000 * Math.exp(-dist / 160));
+    air.frequency.value = Math.max(900, 18000 * Math.exp(-dist / 170));
     const pan = this.panner(pos, shooterIsPlayer ? 3 : 8, shooterIsPlayer ? 1 : 0.9);
     out.connect(air).connect(pan).connect(this.guns);
-    const send = c.createGain();
-    send.gain.value = 0.35 + snd.tail * 0.12;
-    out.connect(send);
-    send.connect(this.reverbSend);
-    send.connect(this.echo);
-    const j = 0.92 + Math.random() * 0.16;
-    this.burst(out, t, { buf: this.white, type: 'highpass', freq: 2600 * j, q: 0.7, attack: 0.0008, dur: 0.035 + snd.crack * 0.02, vol: 0.9 * snd.crack });
-    this.burst(out, t, { buf: this.white, type: 'bandpass', freq: snd.body * j, q: 0.85, attack: 0.001, dur: 0.12 + snd.boom * 0.06, vol: 1.0 });
-    this.burst(out, t + 0.002, { buf: this.pink, type: 'lowpass', freq: 1800, attack: 0.002, dur: 0.22, vol: 0.55 });
-    this.tone(out, t, 150 * j, 42, 0.16 + snd.boom * 0.12, 0.9 * snd.boom);
-    this.burst(out, t + 0.02, { buf: this.brown, type: 'lowpass', freq: 650, attack: 0.03, dur: snd.tail, vol: 0.32 });
+    // The take has its own close reverb; the room send adds space, the echo
+    // send the long repeat off the valley walls (stronger for far shots).
+    const room = c.createGain();
+    room.gain.value = 0.1 + snd.tail * 0.05 + Math.min(0.2, dist / 400);
+    out.connect(room).connect(this.reverbSend);
+    const echo = c.createGain();
+    echo.gain.value = 0.28 + snd.tail * 0.1;
+    out.connect(echo).connect(this.echo);
+    const list = this.takes(snd);
+    this.takeIndex = (this.takeIndex + 1 + Math.floor(Math.random() * (list.length - 1))) % list.length;
+    const src = c.createBufferSource();
+    src.buffer = list[this.takeIndex];
+    src.playbackRate.value = 0.965 + Math.random() * 0.07;
+    src.connect(out);
+    src.start(t);
+    src.onended = () => out.disconnect();
     if (shooterIsPlayer && snd.action === 'slide') this.gunMech('eject', pos);
   }
 

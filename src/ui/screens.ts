@@ -5,6 +5,7 @@ import type { Settings, Quality } from '../core/settings.ts';
 import type { TerrainData } from '../world/terrain.ts';
 import { CREEK, SITES, WORLD_HALF } from '../world/layout.ts';
 import { el } from './hud.ts';
+import { installButton } from '../pwa.ts';
 
 export type Screen = 'none' | 'title' | 'pause' | 'settings' | 'controls' | 'journal' | 'map' | 'ending' | 'credits';
 
@@ -243,6 +244,7 @@ export class Screens {
     this.button(menu, 'Settings', () => this.show('settings', 'title'));
     this.button(menu, 'Controls', () => this.show('controls', 'title'));
     this.button(menu, 'Credits', () => this.show('credits', 'title'));
+    menu.appendChild(installButton('ui-btn'));
     const foot = el('div', 'title-foot');
     foot.textContent = 'Headphones recommended · Click to capture the mouse, Esc to pause · © Sumix Developers';
     p.appendChild(foot);
@@ -361,6 +363,7 @@ export class Screens {
       ['T', 'Truck radio (when available)'],
       ['J / Tab', 'Journal and clues'],
       ['M', 'Map'],
+      ['G', 'Hint for the current objective (press again for more)'],
       ['Esc', 'Pause'],
     ];
     for (const [k, v] of rows) {

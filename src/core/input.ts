@@ -2,7 +2,7 @@
 
 export type Action =
   | 'forward' | 'back' | 'left' | 'right' | 'sprint' | 'jump' | 'interact'
-  | 'journal' | 'map' | 'pause' | 'lights' | 'camera' | 'recover' | 'radio' | 'handbrake' | 'crouch' | 'flashlight'
+  | 'journal' | 'map' | 'hint' | 'pause' | 'lights' | 'camera' | 'recover' | 'radio' | 'handbrake' | 'crouch' | 'flashlight'
   | 'aim' | 'fire' | 'reload' | 'holster' | 'inventory' | 'shoulder' | 'nextWeapon' | 'prevWeapon'
   | 'weapon1' | 'weapon2' | 'weapon3' | 'weapon4' | 'weapon5' | 'weapon6' | 'weapon7' | 'weapon8';
 
@@ -17,6 +17,7 @@ const BINDINGS: Record<Action, string[]> = {
   interact: ['KeyE'],
   journal: ['KeyJ'],
   map: ['KeyM'],
+  hint: ['KeyG'],
   pause: ['Escape', 'KeyP'],
   lights: ['KeyL'],
   camera: ['KeyC'],

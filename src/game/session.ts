@@ -9,6 +9,7 @@ import { Vehicle } from '../vehicles/vehicle.ts';
 import { FOREST_4X4 } from '../vehicles/vehiclePhysics.ts';
 import { FOREST_WAGON, buildVehicle } from '../vehicles/vehicleModel.ts';
 import { placeModel } from '../render/models.ts';
+import { Locals } from './locals.ts';
 import { Interactions, type Interactable } from './interactions.ts';
 import { Hud } from '../ui/hud.ts';
 import { Screens } from '../ui/screens.ts';
@@ -43,6 +44,8 @@ interface SaveData {
   weapons?: SaveWeapons;
   health?: number;
   missions?: unknown;
+  /** Forest locals the ranger has already met. */
+  locals?: string[];
 }
 
 export class Session {
@@ -59,6 +62,7 @@ export class Session {
   weapons!: WeaponSystem;
   npcs!: NpcManager;
   missions!: Missions;
+  locals!: Locals;
   /** Player condition 0..100; regenerates after a few seconds without damage. */
   health = 100;
   /** Tests only: the player cannot be downed. */
@@ -168,6 +172,8 @@ export class Session {
     g.scene.add(this.effects.group);
     this.effects.onCasingLand = (p) => this.audio.footstep('metal', 0.08, p);
     this.weapons = new WeaponSystem(g.player, this.combat, this.effects, this.audio, g.camera);
+    // Gunshots are synthesised once per gun here, during loading.
+    this.audio.prepareGuns(Object.values(WEAPONS).map((w) => w.sound));
     this.weapons.onNotice = (t) => this.hud.showNotice(t, 2);
     this.weapons.onHit = (_h, defeated) => this.hud.hitMarker(defeated);
     this.weapons.onAcquire = (def) => {
@@ -223,6 +229,9 @@ export class Session {
     g.scene.add(sites.group);
     this.missions = new Missions(this, sites);
     this.listeners.frame.push((dt) => this.missions.update(dt));
+    // Friendly locals who introduce themselves and point the way.
+    this.locals = new Locals(this);
+    this.listeners.frame.push((dt) => this.locals.update(dt));
     this.onRespawn = () => this.missions.respawned();
     const light = this.structures.anchors.suvDoor;
     if (light) this.mystery.lightPos = light.clone().add(new THREE.Vector3(0.2, -0.95, 0.3));
@@ -276,6 +285,7 @@ export class Session {
       this.clearSave();
       this.hud.toast('Hollow Creek Ranger District', 'Late afternoon, October 13. Hale\'s last check-in was two days ago.', 'objective');
       this.missions.begin();
+      this.locals.restore(undefined);
     }
     this.playing = true;
     this.screens.show('none');
@@ -717,6 +727,7 @@ export class Session {
       weapons: this.weapons.serialize(),
       health: this.health,
       missions: this.missions.serialize(),
+      locals: this.locals.serialize(),
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -758,6 +769,7 @@ export class Session {
     if (d.weapons) this.weapons.restore(d.weapons);
     if (d.health !== undefined) this.health = Math.max(40, d.health);
     if (d.missions !== undefined) this.missions.restore(d.missions as MissionSave);
+    this.locals.restore(d.locals);
     if (d.mode === 'vehicle') this.enterVehicle(this.truck);
   }
 }

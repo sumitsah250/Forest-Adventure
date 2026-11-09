@@ -2,21 +2,16 @@ import './style.css';
 import { Game } from './core/game.ts';
 import { installTestHooks } from './core/testHooks.ts';
 import { Session } from './game/session.ts';
+import { createLoadingScreen } from './ui/loadingScreen.ts';
+import { initPwa } from './pwa.ts';
+
+initPwa();
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLDivElement;
 
-const loading = document.createElement('div');
-loading.className = 'loading';
-loading.innerHTML = `
-  <div class="studio-tag">Sumix Developers presents</div>
-  <div class="loading__title">POACHER PANIC</div>
-  <div class="loading__bar"><span></span></div>
-  <div class="loading__label">Preparing</div>`;
-ui.appendChild(loading);
-const bar = loading.querySelector('.loading__bar span') as HTMLSpanElement;
-const label = loading.querySelector('.loading__label') as HTMLDivElement;
+const loading = createLoadingScreen(ui, 'forest');
 
 const game = new Game(canvas);
 (window as unknown as { __game: Game }).__game = game;
@@ -24,16 +19,9 @@ const session = new Session(game, ui);
 (window as unknown as { __session: Session }).__session = session;
 
 async function boot(): Promise<void> {
-  await game.init((f, text) => {
-    bar.style.width = `${Math.round(f * 92)}%`;
-    label.textContent = text;
-  });
-  await session.init((f, text) => {
-    bar.style.width = `${Math.round(f * 100)}%`;
-    label.textContent = text;
-  });
-  bar.style.width = '100%';
-  loading.remove();
+  await game.init((f, text) => loading.set(f * 0.92, text));
+  await session.init((f, text) => loading.set(f, text));
+  void loading.done();
   game.start();
   if (!params.has('test')) {
     session.showTitle();
@@ -50,6 +38,6 @@ async function boot(): Promise<void> {
 
 boot().catch((err: unknown) => {
   console.error(err);
-  label.textContent = `Failed to start: ${err instanceof Error ? err.message : String(err)}`;
+  loading.fail(`Failed to start: ${err instanceof Error ? err.message : String(err)}`);
   (window as unknown as { __error: string }).__error = String(err);
 });

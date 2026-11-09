@@ -10,9 +10,10 @@ type Style = 'ground' | 'map' | 'class';
 const H = WORLD_HALF;
 
 const GROUND: Record<string, string> = {
-  outside: '#7b7a52', campus: '#6c8743', grass: '#688a3d', park: '#5c8638', ground: '#8a8a58', orchard: '#5b7838', scrub: '#58703a',
+  outside: '#7b7a52', campus: '#6c8743', grass: '#688a3d', park: '#5c8638', ground: '#978462', orchard: '#5b7838', scrub: '#58703a',
   parking: '#8f8c84', water: '#3d5a66', plaza: '#a7a092', residential: '#86805f', basketball: '#9b9a93', tennis: '#4f6f6c', volleyball: '#9b8360',
-  soccer: '#5e8a3a', table_tennis: '#9b9a93', pitch: '#7a8a55',
+  // The WRC ground is hard-packed earth, not turf.
+  soccer: '#9a8662', table_tennis: '#9b9a93', pitch: '#7a8a55',
   road: '#4b4c4d', roadEdge: '#76746c', residentialRoad: '#77736a', service: '#626260', footway: '#aaa295', path: '#8b7150', steps: '#9d978c',
   track: '#86735a', drain: '#4c524c', apron: '#a39e92', footprint: '#77746d',
 };

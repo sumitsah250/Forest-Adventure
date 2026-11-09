@@ -85,6 +85,8 @@ const MEDEVAC: Line[] = [
   { who: 'You', text: 'Copy. Unit Two out.', t: 2.5 },
 ];
 
+const _wpRel = new THREE.Vector3();
+
 const HINTS: Record<string, string[]> = {
   station: ['Follow Hollow Creek Road north. The ranger station is on the right, past the abandoned SUV.', 'The station spur leaves the road about two kilometres in. The compass marker points to it.'],
   search: ['Look around the ranger station. Hale kept a logbook on her desk.', 'The logbook is on the metal desk against the back wall, inside the door.'],
@@ -166,8 +168,9 @@ export class Mystery {
   private set(f: Flag): boolean {
     if (this.flags.has(f)) return false;
     this.flags.add(f);
+    // Progress restarts the idle timer; the revealed hint only resets when the
+    // objective itself changes (see update), so walking past a landmark keeps it.
     this.lastProgress = this.s.game.time;
-    this.hintLevel = 0;
     return true;
   }
 
@@ -202,7 +205,6 @@ export class Mystery {
     const c = { id, ...CLUES[id] };
     this.clues.push(c);
     this.lastProgress = this.s.game.time;
-    this.hintLevel = 0;
     this.s.hud.toast('Clue added', c.title, 'clue');
     this.sfx?.play('clue');
     this.onClue?.(c);
@@ -609,24 +611,66 @@ export class Mystery {
     this.hintLevel = 0;
   }
 
+  private hintList(o: ObjectiveView): string[] {
+    const list = o.hints?.length ? o.hints : HINTS[o.key];
+    return list?.length ? list : ['Follow the marker on screen and the compass at the top: they point at your objective.'];
+  }
+
   hint(): string {
     const o: ObjectiveView = this.hintSource ?? this.currentObjective();
-    const list = o.hints?.length ? o.hints : HINTS[o.key];
-    if (!list) return 'Explore and look for anything Hale left behind.';
+    const list = this.hintList(o);
     return list[Math.min(list.length - 1, this.hintLevel > 0 ? this.hintLevel - 1 : 0)];
   }
 
-  /** Called when the player asks for a hint from the journal. */
+  /** Hint text currently revealed for the objective (null = none asked for yet). */
+  get shownHint(): string | null {
+    return this.hintLevel > 0 ? this.hint() : null;
+  }
+
+  /** The player asks for a hint (G, the journal or a local): reveals the next one. */
   requestHint(): string {
-    this.hintLevel = Math.min(2, this.hintLevel + 1);
+    const o: ObjectiveView = this.hintSource ?? this.currentObjective();
+    this.hintLevel = Math.min(this.hintList(o).length, this.hintLevel + 1);
     return this.hint();
+  }
+
+  /** The most detailed hint for the current objective (what a local would tell you). */
+  fullHint(): string {
+    const o: ObjectiveView = this.hintSource ?? this.currentObjective();
+    this.hintLevel = this.hintList(o).length;
+    return this.hint();
+  }
+
+  private wpPos = new THREE.Vector3();
+  private wpFwd = new THREE.Vector3();
+
+  /** On-screen marker over the objective target, fading out once you are there. */
+  private updateWaypoint(target: THREE.Vector3 | null, from: THREE.Vector3): void {
+    const g = this.s.game;
+    if (!target || this.zoom) {
+      this.s.hud.setWaypoint(null);
+      return;
+    }
+    const cam = g.camera;
+    const ground = g.terrain.heightAt(target.x, target.z);
+    const p = this.wpPos.set(target.x, Math.max(target.y, ground) + 1.1, target.z);
+    cam.getWorldDirection(this.wpFwd);
+    const behind = this.wpFwd.dot(_wpRel.copy(p).sub(cam.position)) < 0;
+    p.project(cam);
+    const dist = Math.hypot(target.x - from.x, target.z - from.z);
+    const opacity = THREE.MathUtils.clamp((dist - 2.5) / 4, 0, 1);
+    const label = dist > 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`;
+    this.s.hud.setWaypoint({ ndcX: p.x, ndcY: p.y, behind, label, opacity });
   }
 
   // ------------------------------------------------------------ per frame
 
   private update(dt: number): void {
     const g = this.s.game;
-    if (this.ended) return;
+    if (this.ended) {
+      this.s.hud.setWaypoint(null);
+      return;
+    }
     const pos = this.s.focusPosition;
     const near = (v: THREE.Vector3 | undefined | { x: number; z: number }, r: number) => !!v && Math.hypot(pos.x - v.x, pos.z - v.z) < r;
     const a = this.st.anchors;
@@ -719,9 +763,24 @@ export class Mystery {
       this.s.setForcedPrompt(null);
     }
 
-    // Objective HUD, compass marker and hints.
+    // Objective HUD, compass marker, on-screen waypoint and hints.
     const o: ObjectiveView = this.hudOverride?.() ?? this.currentObjective();
-    this.s.hud.setObjective(o.text, o.sub);
+    if (o.key !== this.hintObjective) {
+      this.hintObjective = o.key;
+      this.lastProgress = g.time;
+      this.hintLevel = 0;
+    }
+    this.hintSource = o;
+    if (g.input.pressed('hint') && !this.busy) {
+      this.requestHint();
+      this.sfx?.play('radioBeep');
+    }
+    const hints = this.hintList(o);
+    this.s.hud.setObjective(o.text, o.sub, {
+      hint: this.shownHint,
+      hintKey: this.hintLevel === 0 ? 'Hint' : this.hintLevel < hints.length ? 'More help' : null,
+    });
+    this.updateWaypoint(o.target, pos);
     if (o.target) {
       const dx = o.target.x - pos.x;
       const dz = o.target.z - pos.z;
@@ -731,20 +790,10 @@ export class Mystery {
     } else {
       this.s.hud.setCompass(this.s.compassHeading, null);
     }
-    if (o.key !== this.hintObjective) {
-      this.hintObjective = o.key;
-      this.lastProgress = g.time;
-      this.hintLevel = 0;
-    }
-    this.hintSource = o;
+    // Stuck on one objective for a while: hints appear by themselves in the panel.
     const idle = g.time - this.lastProgress;
-    if (!this.busy && idle > 180 && this.hintLevel === 0) {
-      this.hintLevel = 1;
-      this.s.hud.toast('Hint', this.hint(), 'hint');
-    } else if (!this.busy && idle > 330 && this.hintLevel === 1) {
-      this.hintLevel = 2;
-      this.s.hud.toast('Hint', this.hint(), 'hint');
-    }
+    if (!this.busy && idle > 90 && this.hintLevel === 0) this.hintLevel = 1;
+    else if (!this.busy && idle > 210 && this.hintLevel === 1 && hints.length > 1) this.hintLevel = 2;
 
     // Light moves toward dusk as the story advances.
     const targetDusk = Math.min(0.9, this.progress() * 0.95);

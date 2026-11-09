@@ -10,7 +10,8 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { GROUP, groups, type PhysicsWorld } from '../physics/physics.ts';
 import type { TerrainData, SurfaceKind } from '../world/terrain.ts';
 import type { Input } from '../core/input.ts';
-import { PLAYER_SUIT, createHumanoid, type Humanoid, type Outfit } from '../character/humanoid.ts';
+import { PLAYER_SUIT, type Humanoid, type Outfit } from '../character/humanoid.ts';
+import { PlayerClips, createPlayerHumanoid } from '../character/playerModel.ts';
 import { Animator, type HandTargets } from '../character/animator.ts';
 import { ThirdPersonCamera } from './thirdPersonCamera.ts';
 
@@ -92,6 +93,8 @@ export class Player {
   inWater = 0;
   character: Humanoid | null = null;
   animator: Animator | null = null;
+  /** The player model's own Idle/Walk/Run/Jump clips (null for the built-in character). */
+  clips: PlayerClips | null = null;
   tpc: ThirdPersonCamera;
   baseFov = 68;
   /** Half-size of the square the player may walk in (metres from the map centre). */
@@ -129,12 +132,16 @@ export class Player {
     this.tpc = new ThirdPersonCamera(physics, terrain);
   }
 
-  /** Creates the visible character (after the scene exists). */
+  /**
+   * Creates the visible character (after the scene exists): the player's own model
+   * when `loadPlayerModel()` has finished, otherwise the built-in one.
+   */
   attachCharacter(scene: THREE.Scene, outfit: Outfit = PLAYER_SUIT): void {
-    this.character = createHumanoid(outfit);
+    this.character = createPlayerHumanoid(outfit);
     scene.add(this.character.root);
     const ground = (x: number, z: number, fromY: number) => this.physics.groundHeight(x, z, fromY) ?? this.terrain.heightAt(x, z);
     this.animator = new Animator(this.character, ground);
+    this.clips = PlayerClips.create(this.character);
     this.animator.onFootPlant = (_side, _pos, strength) => {
       if (this.enabled) this.onStep?.({ surface: this.surface(), intensity: strength });
     };
@@ -301,6 +308,14 @@ export class Player {
       hands: this.hands,
       pose: 'normal',
       flinch: this.flinch,
+    });
+    // The model's own clips while moving empty-handed; weapons, crouching and
+    // scripted views stay with the procedural animator (it handles grips and IK).
+    this.clips?.update(dt, {
+      speed: Math.hypot(this.velocity.x, this.velocity.z),
+      grounded: this.grounded,
+      vy: this.vVel,
+      active: !this.animator.handsActive && this.crouchT < 0.15 && !this.firstPerson,
     });
   }
 

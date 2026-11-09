@@ -21,28 +21,21 @@ import { CampusGround } from './ground.ts';
 import { buildCampus } from './world.ts';
 import { populate, type Person } from './people.ts';
 import { PLAYER_SUIT } from '../character/humanoid.ts';
+import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI } from './ui.ts';
 import { Quest, clearSave, loadSave } from './quest.ts';
+import { createLoadingScreen } from '../ui/loadingScreen.ts';
+import { initPwa } from '../pwa.ts';
+
+initPwa();
 
 const FIXED_DT = 1 / 60;
 const params = new URLSearchParams(location.search);
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const uiRoot = document.getElementById('ui') as HTMLDivElement;
-const loading = document.createElement('div');
-loading.className = 'loading';
-loading.innerHTML = `
-  <div class="studio-tag">Sumix Developers presents</div>
-  <div class="loading__title">CAMPUS QUEST</div>
-  <div class="loading__bar"><span></span></div>
-  <div class="loading__label">Preparing</div>`;
-uiRoot.appendChild(loading);
-const bar = loading.querySelector('.loading__bar span') as HTMLSpanElement;
-const label = loading.querySelector('.loading__label') as HTMLDivElement;
-const progress = (f: number, text: string) => {
-  bar.style.width = `${Math.round(f * 100)}%`;
-  label.textContent = text;
-};
+const loading = createLoadingScreen(uiRoot, 'campus');
+const progress = (f: number, text: string) => loading.set(f, text);
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 async function boot(): Promise<void> {
@@ -75,6 +68,7 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', resize);
   const input = new Input(canvas);
 
+  const playerModel = loadPlayerModel();
   progress(0.02, 'Starting physics');
   const R = await initRapier();
   progress(0.04, 'Reading the slope of Lamachaur');
@@ -121,7 +115,8 @@ async function boot(): Promise<void> {
   player.sensitivity = settings.mouseSensitivity;
   player.invertY = settings.invertY;
   player.baseFov = settings.fov;
-  // The player is modelled on the developer's reference photos (navy suit, textured hair, beard).
+  // The player's own model (public/assets/models/player/me.glb); the built-in suit is the fallback.
+  await playerModel;
   player.attachCharacter(scene, PLAYER_SUIT);
   physics.step();
 
@@ -247,7 +242,7 @@ async function boot(): Promise<void> {
   // Dialogues and quizzes need the mouse; give it back when they close.
   let wasModal = false;
 
-  loading.remove();
+  void loading.done();
   toTitle();
   (window as unknown as { __campus: unknown }).__campus = { quest, player, ui, world, ground, scene, camera, renderer };
 
@@ -320,6 +315,6 @@ async function boot(): Promise<void> {
 
 boot().catch((err: unknown) => {
   console.error(err);
-  label.textContent = `Failed to start: ${err instanceof Error ? err.message : String(err)}`;
+  loading.fail(`Failed to start: ${err instanceof Error ? err.message : String(err)}`);
   (window as unknown as { __error: string }).__error = String(err);
 });

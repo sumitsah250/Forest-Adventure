@@ -11,6 +11,7 @@ import { Atmosphere } from '../render/atmosphere.ts';
 import { TerrainRenderer, makeCanopyTexture } from '../render/terrainMesh.ts';
 import { loadPbr, setMaxAnisotropy } from '../render/textures.ts';
 import { Player } from '../player/player.ts';
+import { loadPlayerModel } from '../character/playerModel.ts';
 import { buildFoliageAtlas } from '../render/foliageAtlas.ts';
 import { Vegetation } from '../world/vegetation.ts';
 import { windUniforms } from '../render/foliageMaterial.ts';
@@ -120,6 +121,7 @@ export class Game {
   onResize: ((w: number, h: number) => void) | null = null;
 
   async init(progress: Progress): Promise<void> {
+    const playerModel = loadPlayerModel();
     progress(0.02, 'Starting physics');
     const R = await initRapier();
     progress(0.08, 'Shaping the valley');
@@ -169,6 +171,7 @@ export class Game {
     this.player.sensitivity = this.settings.mouseSensitivity;
     this.player.invertY = this.settings.invertY;
     this.player.baseFov = this.settings.fov;
+    await playerModel;
     this.player.attachCharacter(this.scene);
     this.physics.step();
     progress(1, 'Ready');

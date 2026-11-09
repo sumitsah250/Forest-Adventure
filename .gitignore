@@ -3,3 +3,6 @@ dist/
 test-results/
 *.log
 .DS_Store
+
+# Unused personal model; kept local only.
+public/assets/models/player/me.glb

@@ -3,6 +3,7 @@
 
 import { DATA, WORLD_HALF, centroid } from './geo.ts';
 import { shuffled, type Question } from './questions.ts';
+import { installButton } from '../pwa.ts';
 
 const TEST = new URLSearchParams(location.search).has('test');
 
@@ -423,9 +424,9 @@ export class CampusUI {
     menu.append(controls);
     const back = el('a', 'cq-btn', 'Play Poacher Panic (forest)');
     back.href = './index.html';
-    menu.append(back);
+    menu.append(back, installButton('cq-btn'));
     box.append(menu, el('div', 'cq-controls', CONTROLS));
-    box.append(el('div', 'cq-title__credit', 'Campus map © OpenStreetMap contributors (ODbL) · Elevation: Copernicus DEM · Characters are fictional'));
+    box.append(el('div', 'cq-title__credit', 'Campus map © OpenStreetMap contributors (ODbL) · Footprints © Microsoft (ODbL) · Elevation: SRTM · Characters are fictional'));
     ov.append(box);
   }
 

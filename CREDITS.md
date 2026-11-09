@@ -33,8 +33,11 @@ hanging_industrial_lamp, wall_clock, metal_toolbox, worn_metal_rack, trashbag, w
 - Campus and neighbourhood map: © OpenStreetMap contributors, available under the Open Database License
   (ODbL 1.0): https://www.openstreetmap.org/copyright. Extracted with the Overpass API by
   `scripts/build-campus-data.mjs` into `src/campus/campusData.json` (a derived database, also ODbL).
-- Elevation: Copernicus DEM GLO-90 (© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018,
-  provided under COPERNICUS by the European Union and ESA), via the Open-Meteo elevation API.
+- Elevation: SRTM 1 arc-second (NASA/USGS, public domain) via the AWS Terrain Tiles (Mapzen/Tilezen,
+  https://github.com/tilezen/joerd/blob/master/docs/attribution.md), sampled every 10 m by
+  `scripts/build-campus-dem.mjs`.
+- Extra building footprints (buildings OpenStreetMap does not have yet): Microsoft Global ML Building
+  Footprints, © Microsoft, Open Database License (ODbL 1.0), merged by `scripts/merge-ms-buildings.mjs`.
 - Institute of Engineering, Tribhuvan University and Pashchimanchal Campus are real institutions; the game is an
   unofficial fan project. Every host and student in Campus Quest is fictional.
 

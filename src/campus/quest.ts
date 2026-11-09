@@ -99,7 +99,7 @@ export class Quest {
       const s = this.resolve(lv.where, lv.place);
       this.spots.push(s);
       const p = new Person(c.scene, lv.host.outfit, c.ground, c.physics, s.x, s.z, s.facing, lv.host.name);
-      c.physics.addCylinder(s.x, c.ground.heightAt(s.x, s.z), s.z, 0.85, 0.32);
+      c.physics.addCylinder(s.x, c.ground.standAt(s.x, s.z), s.z, 0.85, 0.32);
       this.hosts.push(p);
     });
   }
@@ -138,7 +138,7 @@ export class Quest {
       for (const [i, d] of lv.fetch.items.entries()) {
         const spot = this.resolve(d.where, d.label, true);
         const obj = await itemModel(d.model);
-        obj.position.set(spot.x, this.c.ground.heightAt(spot.x, spot.z), spot.z);
+        obj.position.set(spot.x, this.c.ground.standAt(spot.x, spot.z), spot.z);
         obj.rotation.y = spot.facing;
         const already = got.includes(i);
         obj.visible = !already;
@@ -201,7 +201,7 @@ export class Quest {
     const { main } = this.targets();
     const host = this.hosts[this.level];
     if (main) {
-      const y = this.c.ground.heightAt(main.x, main.z);
+      const y = this.c.ground.standAt(main.x, main.z);
       this.beacon.set(main.x, y, main.z, Math.hypot(player.x - main.x, player.z - main.z), t, this.stage !== 'fetch' ? 2.15 : 1.4);
     }
     this.beacon.group.visible = !!main;

@@ -14,7 +14,7 @@
 //  - Poses for the air (jump/fall), sitting (vehicles) and surrender (kneeling).
 
 import * as THREE from 'three';
-import { BIND_JOINTS, BONE_PARENT, type BoneName, type Humanoid } from './humanoid.ts';
+import { BONE_PARENT, type BoneName, type Humanoid } from './humanoid.ts';
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -120,6 +120,8 @@ export class Animator {
   private headPitch = 0;
   private poseBlend = { sit: 0, surrender: 0, down: 0 };
   private initialised = false;
+  /** Hands were on a weapon in the last update (arm IK active). */
+  handsActive = false;
   /** Called when a foot lands (side, world position, strength 0..1). */
   onFootPlant: ((side: 1 | -1, pos: THREE.Vector3, strength: number) => void) | null = null;
   readonly legLen: number;
@@ -132,6 +134,8 @@ export class Animator {
   constructor(rig: Humanoid, ground: GroundFn) {
     this.rig = rig;
     this.ground = ground;
+    const BIND_JOINTS = rig.joints;
+    this.hipsY = BIND_JOINTS.hips[1];
     for (const [name, bone] of Object.entries(rig.bones) as [BoneName, THREE.Bone][]) {
       const parentName = BONE_PARENT[name];
       const j = BIND_JOINTS[name];
@@ -405,6 +409,7 @@ export class Animator {
     this.setRot('shoulder.L', chestQ);
     this.setRot('shoulder.R', chestQ);
     const hands = typeof s.hands === 'function' ? s.hands(this) : s.hands;
+    this.handsActive = !!hands;
     if (this.poseBlend.surrender > 0.5) this.surrenderArms();
     else if (hands) this.solveArms(hands);
     else this.swingArms(speed, run, s);

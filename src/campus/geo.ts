@@ -2,6 +2,7 @@
 // amount of 2D geometry the world builder needs. Coordinates: +x east, +z south, metres.
 
 import raw from './campusData.json';
+import { BUILDING_OVERRIDES } from './buildingOverrides.ts';
 
 export type Pt = [number, number];
 
@@ -15,6 +16,10 @@ export interface BuildingData {
   roofShape?: string;
   kind: string;
   inside: boolean;
+  /** 'ms': footprint from Microsoft's building footprints (missing from OSM). */
+  source?: 'ms';
+  /** Has a walkable interior (buildingOverrides.ts). */
+  enterable?: boolean;
 }
 
 export interface AreaData {
@@ -32,6 +37,8 @@ export interface LineData {
   surface?: string;
   name?: string;
   area?: boolean;
+  /** Passes under a building (OSM tunnel=building_passage / covered): a walk-through passage. */
+  tunnel?: boolean;
 }
 
 export interface PointData {
@@ -53,6 +60,110 @@ export interface CampusData {
 }
 
 export const DATA = raw as unknown as CampusData;
+DATA.buildings = clearRoads(dedupeBuildings(DATA.buildings));
+for (const b of DATA.buildings) {
+  const o = b.name ? BUILDING_OVERRIDES[b.name] : undefined;
+  if (!o) continue;
+  if (o.levels !== undefined) b.levels = o.levels;
+  if (o.height !== undefined || o.levels !== undefined) b.height = o.height;
+  if (o.enterable) b.enterable = true;
+}
+
+/**
+ * Buildings must not stand on roads or paths. A small OSM building drawn over a
+ * road (a guard booth by the gate, say) is nudged off it, up to 6 m; Microsoft
+ * footprints that land on a road or path are imprecise and dropped. Passages
+ * (tunnel) run through buildings on purpose and are ignored here.
+ */
+function clearRoads(list: BuildingData[]): BuildingData[] {
+  const ROADS = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'service', 'track', 'living_street']);
+  const PATHS = new Set(['footway', 'path', 'pedestrian', 'steps', 'cycleway']);
+  const out: BuildingData[] = [];
+  for (const b of list) {
+    let pts = b.pts;
+    let keep = true;
+    for (let pass = 0; pass < 3 && keep; pass += 1) {
+      let fix: { nx: number; nz: number; d: number } | null = null;
+      for (const l of DATA.lines) {
+        if (l.tunnel || l.area || !(ROADS.has(l.kind) || PATHS.has(l.kind))) continue;
+        for (let i = 0; i < l.pts.length - 1 && !fix; i += 1) {
+          const a = l.pts[i];
+          const c = l.pts[i + 1];
+          const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          if (len < 0.01) continue;
+          // Does this segment run through the footprint?
+          let through = false;
+          for (let t = 0.05; t < 1 && !through; t += 0.1) through = pointInPoly(a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, pts);
+          if (!through) continue;
+          if (b.source === 'ms') {
+            keep = false;
+            break;
+          }
+          if (!ROADS.has(l.kind) || Math.abs(polyArea(pts)) > 120) continue;
+          // Push the footprint to the side its centre is on, clear of the road edge.
+          const nx = -(c[1] - a[1]) / len;
+          const nz = (c[0] - a[0]) / len;
+          const [cx, cz] = centroid(pts);
+          const side = (cx - a[0]) * nx + (cz - a[1]) * nz >= 0 ? 1 : -1;
+          const minD = Math.min(...pts.map(([x, z]) => ((x - a[0]) * nx + (z - a[1]) * nz) * side));
+          fix = { nx: nx * side, nz: nz * side, d: l.w / 2 + 0.6 - minD };
+        }
+        if (!keep || fix) break;
+      }
+      if (!keep || !fix) break;
+      if (fix.d > 6) {
+        keep = false;
+        break;
+      }
+      pts = pts.map(([x, z]) => [x + fix!.nx * fix!.d, z + fix!.nz * fix!.d] as Pt);
+    }
+    if (keep) out.push(pts === b.pts ? b : { ...b, pts });
+  }
+  return out;
+}
+
+/**
+ * OpenStreetMap sometimes has a building twice (an unnamed outline under the named
+ * one). Two sets of walls in the same place flicker (z-fighting), so a building
+ * mostly covered by another is dropped, keeping the named / better-tagged one.
+ */
+function dedupeBuildings(list: BuildingData[]): BuildingData[] {
+  const bb = list.map((b) => {
+    let a = Infinity, c = Infinity, d = -Infinity, e = -Infinity;
+    for (const [x, z] of b.pts) {
+      a = Math.min(a, x); c = Math.min(c, z); d = Math.max(d, x); e = Math.max(e, z);
+    }
+    return [a, c, d, e];
+  });
+  const score = (b: BuildingData) => (b.name ? 4 : 0) + (b.levels ? 2 : 0) + (b.source === 'ms' ? -1 : 0);
+  const drop = new Set<number>();
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const A = bb[i], B = bb[j];
+      if (A[2] < B[0] || B[2] < A[0] || A[3] < B[1] || B[3] < A[1]) continue;
+      let inA = 0, inB = 0, both = 0;
+      const step = 0.75;
+      for (let x = Math.max(A[0], B[0]); x <= Math.min(A[2], B[2]); x += step) {
+        for (let z = Math.max(A[1], B[1]); z <= Math.min(A[3], B[3]); z += step) {
+          const p = pointInPoly(x, z, list[i].pts);
+          const q = pointInPoly(x, z, list[j].pts);
+          if (p) inA += 1;
+          if (q) inB += 1;
+          if (p && q) both += 1;
+        }
+      }
+      if (!both) continue;
+      // Share of the smaller footprint covered by the other.
+      const areaI = Math.abs(polyArea(list[i].pts)) / (step * step);
+      const areaJ = Math.abs(polyArea(list[j].pts)) / (step * step);
+      if (both / Math.max(1, Math.min(areaI, areaJ)) < 0.6) continue;
+      drop.add(score(list[i]) >= score(list[j]) ? j : i);
+      void inA;
+      void inB;
+    }
+  }
+  return list.filter((_, i) => !drop.has(i));
+}
 
 /** Half-size of the playable square. */
 export const WORLD_HALF = 420;

@@ -60,6 +60,7 @@ const ICONS: Record<string, string> = {
   journal: '<path d="M5 4.5h11a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11M9 8h6"/>',
   map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
   pause: '<path d="M9 5v14M15 5v14"/>',
+  hint: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.6 2.3c-.8.4-1.2 1-1.2 1.9v.5M12 17v.01"/>',
 };
 
 function icon(name: string): string {
@@ -256,6 +257,10 @@ export class TouchControls {
     this.torchBtn = util('torch', 'Flashlight', () => {
       this.press('flashlight');
       this.release('flashlight');
+    });
+    util('hint', 'Hint', () => {
+      this.press('hint');
+      this.release('hint');
     });
     util('journal', 'Journal', () => onMenu('journal'));
     util('map', 'Map', () => onMenu('map'));

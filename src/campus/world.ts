@@ -20,6 +20,7 @@ import {
 } from './geo.ts';
 import { CLS, type CampusGround } from './ground.ts';
 import { classGrid, paintPlan } from './paint.ts';
+import { buildEnterable } from './interior.ts';
 
 export interface Entrance {
   /** Where a person stands in front of the door, facing out. */
@@ -69,6 +70,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const clsCanvas = paintPlan(1024, 'class');
   ground.cls = classGrid(clsCanvas);
   ground.clsN = 1024;
+  paintBanks(groundCanvas, ground);
   const mapCanvas = paintPlan(1024, 'map');
   const groundTex = new THREE.CanvasTexture(groundCanvas);
   groundTex.colorSpace = THREE.SRGBColorSpace;
@@ -93,8 +95,21 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const kit = new Kit();
   const rng = mulberry32(2044);
   const footprints: { b: BuildingData; floor: number; top: number }[] = [];
+  const walkIn = new Map<BuildingData, Entrance>();
+  const interiors = new THREE.Group();
+  interiors.name = 'interiors';
+  group.add(interiors);
   for (const b of DATA.buildings) {
     if (Math.abs(centroid(b.pts)[0]) > WORLD_HALF + 40 || Math.abs(centroid(b.pts)[1]) > WORLD_HALF + 40) continue;
+    if (b.enterable) {
+      const wallCol = new THREE.Color(b.wall ?? '#f3eccf');
+      const r = buildEnterable(b, ground, physics, interiors, B, wallCol);
+      if (r) {
+        footprints.push({ b, floor: r.floor, top: r.top });
+        walkIn.set(b, { ...r.entrance, building: b });
+        continue;
+      }
+    }
     const info = building(b, ground, B, kit, physics, rng);
     if (info) footprints.push({ b, ...info });
   }
@@ -116,20 +131,25 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const entranceFor = (b: BuildingData, label?: string): Entrance => {
     const hit = entrances.get(b);
     if (hit) return hit;
-    const e = findEntrance(b, ground, floorOf.get(b)?.floor ?? ground.heightAt(...centroid(b.pts)));
+    const open = walkIn.get(b);
+    const e = open ?? findEntrance(b, ground, floorOf.get(b)?.floor ?? ground.heightAt(...centroid(b.pts)));
     entrances.set(b, e);
-    addDoor(signGroup, e, label ?? b.name ?? '', floorOf.get(b)?.floor ?? e.y, physics);
+    addDoor(signGroup, e, label ?? b.name ?? '', floorOf.get(b)?.floor ?? e.y, physics, ground, !!open);
     return e;
   };
   for (const b of DATA.buildings) if (b.inside && b.name && !/[^\x20-\x7e]/.test(b.name) && polyArea(b.pts) !== 0) entranceFor(b, signName(b.name));
 
   // ------------------------------------------------------------------ walls, gate, props
   o.progress(0.45, 'Building walls and the main gate');
-  boundaryWall(kit, ground, physics);
+  const panels = { grill: new Panels(), chain: new Panels() };
+  boundaryWall(kit, ground, physics, panels);
   for (const l of DATA.lines) {
-    if (l.kind === 'wall') linearBarrier(kit, ground, physics, l.pts, 'wall');
-    if (l.kind === 'fence') linearBarrier(kit, ground, physics, l.pts, 'fence');
+    if (l.kind === 'wall') linearBarrier(kit, ground, physics, l.pts, 'wall', [], panels);
+    if (l.kind === 'fence') linearBarrier(kit, ground, physics, l.pts, 'fence', [], panels);
+    if (l.kind === 'steps') stairs(kit, ground, l.pts, l.w);
   }
+  standTiers(kit, ground, physics);
+
   mainGate(group, kit, ground, physics);
   o.progress(0.55, 'Placing benches, lamps and statues');
   let flag: THREE.Mesh | null = null;
@@ -155,6 +175,13 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     if (admin) flag = flagpole(group, kit, admin.x + 4, ground.heightAt(admin.x + 4, admin.z - 14), admin.z - 14, physics);
   }
   for (const a of DATA.areas) if (a.kind === 'pitch' || a.kind === 'ground') sports(kit, ground, physics, a.pts, (a.sport ?? '').split(';')[0], a.kind);
+  // Courts with ball games that fly (tennis, futsal) are fenced in chain-link.
+  for (const a of DATA.areas) {
+    const sp = (a.sport ?? '').split(';')[0];
+    if (a.kind === 'pitch' && ['tennis', 'futsal'].includes(sp)) linearBarrier(kit, ground, physics, [...a.pts, a.pts[0]], 'fence', [], panels, 3.2);
+  }
+  panels.grill.build(group, grillTexture(), 'boundary-grill');
+  panels.chain.build(group, chainTexture(), 'chain-link');
   // Rooftop water tanks on the town's flat-roofed houses.
   for (const f of footprints) {
     if (f.b.inside || f.b.roofShape === 'pitched' || polyArea(f.b.pts) === 0) continue;
@@ -458,6 +485,8 @@ function stain(ctx: CanvasRenderingContext2D, s: number): void {
 
 // ==================================================================== buildings
 
+const PLINTH = new THREE.Color('#8c877c');
+const CEILING = new THREE.Color('#e8e4da');
 const HOUSE_COLOURS = ['#efe9dc', '#f2e2c4', '#e9c9b5', '#dfe6e8', '#f0d9a8', '#e8d1d8', '#d6e3cf', '#f4efe6', '#e7b98b', '#cfd8e4'];
 
 function building(
@@ -478,8 +507,11 @@ function building(
     gmin = Math.min(gmin, h);
     gsum += h;
   }
-  const floor = gsum / pts.length;
-  const y0 = gmin - 0.6;
+  // The building stands on its graded platform; the ground floor is raised on a
+  // plinth (campus blocks more than town houses), as hillside buildings are here.
+  const pad = ground.padLevel(b) ?? gsum / pts.length;
+  const floor = pad + (b.inside ? 0.45 : 0.2);
+  const y0 = Math.min(gmin, pad) - 0.6;
   const name = b.name ?? '';
   const small = area < 45;
   let storeys: number;
@@ -499,6 +531,72 @@ function building(
   const facade = b.inside ? B.facade : B.shop;
   const bay = workshop ? 4.6 : b.inside ? 3.3 : 3.0;
 
+  // Walk-through passages (OSM tunnel paths under the building): an opening at
+  // ground level in each wall the path crosses, plastered sides and a ceiling.
+  const passH = Math.min(3.0, height - 0.6);
+  const openings = new Map<number, { t0: number; t1: number; top: number }[]>();
+  const passages: { p0: Pt; p1: Pt; ux: number; uz: number }[] = [];
+  for (const l of DATA.lines) {
+    if (!l.tunnel || l.pts.length < 2 || storeys < 2) continue;
+    const s0 = l.pts[0];
+    const s1 = l.pts[l.pts.length - 1];
+    const ll = Math.hypot(s1[0] - s0[0], s1[1] - s0[1]);
+    if (ll < 0.5) continue;
+    const ux = (s1[0] - s0[0]) / ll;
+    const uz = (s1[1] - s0[1]) / ll;
+    // The mapped line can be a metre or two off: find the nearest parallel line
+    // (shifted up to 5 m) that passes cleanly through the building, with open
+    // ground at both ends, near where the path is mapped.
+    const c0: Pt = [(s0[0] + s1[0]) / 2, (s0[1] + s1[1]) / 2];
+    const qx = -uz;
+    const qz = ux;
+    let run: { a: number; b: number; shift: number } | null = null;
+    for (let k = 0; k <= 20 && !run; k += 1) {
+      const shift = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.5;
+      const ins: boolean[] = [];
+      for (let d = -25; d <= 25; d += 0.25) ins.push(pointInPoly(c0[0] + qx * shift + ux * d, c0[1] + qz * shift + uz * d, pts));
+      // Runs of inside samples; keep the one nearest the mapped segment.
+      let best: { a: number; b: number; gap: number } | null = null;
+      for (let i = 0; i < ins.length; i += 1) {
+        if (!ins[i] || (i > 0 && ins[i - 1])) continue;
+        let j = i;
+        while (j + 1 < ins.length && ins[j + 1]) j += 1;
+        const da = -25 + i * 0.25;
+        const db = -25 + j * 0.25;
+        // Open at both ends, and not running far beyond where the path is mapped.
+        const ok = i > 0 && j < ins.length - 1 && db - da <= 14 && da >= -ll / 2 - 2.5 && db <= ll / 2 + 2.5;
+        const gap = Math.max(0, da - ll / 2, -ll / 2 - db);
+        if (ok && gap < 2 && (!best || gap < best.gap)) best = { a: da, b: db, gap };
+      }
+      if (best) run = { a: best.a, b: best.b, shift };
+    }
+    if (!run) continue;
+    const mid: Pt = [c0[0] + qx * run.shift + ux * (run.a + run.b) / 2, c0[1] + qz * run.shift + uz * (run.a + run.b) / 2];
+    const far: [Pt, Pt] = [[mid[0] - ux * ((run.b - run.a) / 2 + 1), mid[1] - uz * ((run.b - run.a) / 2 + 1)], [mid[0] + ux * ((run.b - run.a) / 2 + 1), mid[1] + uz * ((run.b - run.a) / 2 + 1)]];
+    let back: { i: number; p: Pt; d: number } | null = null;
+    let fwd: { i: number; p: Pt; d: number } | null = null;
+    for (let i = 0; i < pts.length; i += 1) {
+      const p = intersect(far[0], far[1], pts[i], pts[(i + 1) % pts.length]);
+      if (!p) continue;
+      const d = (p[0] - mid[0]) * ux + (p[1] - mid[1]) * uz;
+      if (d < 0 && (!back || -d < -back.d)) back = { i, p, d };
+      if (d > 0 && (!fwd || d < fwd.d)) fwd = { i, p, d };
+    }
+    if (!back || !fwd) continue;
+    for (const h of [back, fwd]) {
+      const e0 = pts[h.i];
+      const e1 = pts[(h.i + 1) % pts.length];
+      const el = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]);
+      const sin = Math.abs((ux * (e1[1] - e0[1]) - uz * (e1[0] - e0[0])) / el);
+      const t = Math.hypot(h.p[0] - e0[0], h.p[1] - e0[1]) / el;
+      const dt = 1.3 / (el * Math.max(0.3, sin));
+      const list = openings.get(h.i) ?? [];
+      list.push({ t0: Math.max(0, t - dt), t1: Math.min(1, t + dt), top: pad + passH });
+      openings.set(h.i, list);
+    }
+    passages.push({ p0: back.p, p1: fwd.p, ux, uz });
+  }
+
   for (let i = 0; i < pts.length; i += 1) {
     const a = pts[i];
     const c = pts[(i + 1) % pts.length];
@@ -511,25 +609,79 @@ function building(
     const n = new THREE.Vector3(nx, 0, nz);
     const windows = len >= 2.6 && !small;
     const target = windows ? facade : B.plain;
-    const u1 = windows ? Math.max(1, Math.round(len / bay)) : len / 3;
-    const v0 = (y0 - floor) / storeyH;
+    const bays = windows ? Math.max(1, Math.round(len / bay)) : len / 3;
     const v1 = height / storeyH;
-    const A0 = new THREE.Vector3(a[0], y0, a[1]);
-    const A1 = new THREE.Vector3(a[0], top, a[1]);
-    const C0 = new THREE.Vector3(c[0], y0, c[1]);
-    const C1 = new THREE.Vector3(c[0], top, c[1]);
-    const ia = target.vert(A0, n, 0, windows ? v0 : y0 / 3, 0.92, 0, wall);
-    const ib = target.vert(A1, n, 0, windows ? v1 : top / 3, 1, 0, wall);
-    const ic = target.vert(C1, n, u1, windows ? v1 : top / 3, 1, 0, wall);
-    const id = target.vert(C0, n, u1, windows ? v0 : y0 / 3, 0.92, 0, wall);
-    target.quad(ia, ib, ic, id);
-    // Collision: one thin box per wall segment.
-    if (len > 0.3) {
-      physics.tag(physics.addBox({
-        x: (a[0] + c[0]) / 2 - nx * 0.25, y: (y0 + top) / 2, z: (a[1] + c[1]) / 2 - nz * 0.25,
-        hx: len / 2, hy: (top - y0) / 2, hz: 0.3, rotY: Math.atan2(-dz, dx),
-      }), 'rock');
+    // Pieces along the edge: full height, or above an opening.
+    const cuts = (openings.get(i) ?? []).sort((p, q) => p.t0 - q.t0);
+    const pieces: { t0: number; t1: number; bottom: number | null }[] = [];
+    let at = 0;
+    for (const o of cuts) {
+      if (o.t0 > at) pieces.push({ t0: at, t1: o.t0, bottom: null });
+      pieces.push({ t0: o.t0, t1: o.t1, bottom: o.top });
+      at = o.t1;
     }
+    if (at < 1) pieces.push({ t0: at, t1: 1, bottom: null });
+    for (const pc of pieces) {
+      const pa: Pt = [a[0] + dx * pc.t0, a[1] + dz * pc.t0];
+      const pb: Pt = [a[0] + dx * pc.t1, a[1] + dz * pc.t1];
+      const yb = pc.bottom ?? floor;
+      const u0 = bays * pc.t0;
+      const u1 = bays * pc.t1;
+      const vb = windows ? (yb - floor) / storeyH : yb / 3;
+      const ia = target.vert(new THREE.Vector3(pa[0], yb, pa[1]), n, u0, vb, 0.92, 0, wall);
+      const ib = target.vert(new THREE.Vector3(pa[0], top, pa[1]), n, u0, windows ? v1 : top / 3, 1, 0, wall);
+      const ic = target.vert(new THREE.Vector3(pb[0], top, pb[1]), n, u1, windows ? v1 : top / 3, 1, 0, wall);
+      const id = target.vert(new THREE.Vector3(pb[0], yb, pb[1]), n, u1, vb, 0.92, 0, wall);
+      target.quad(ia, ib, ic, id);
+      const segLen = len * (pc.t1 - pc.t0);
+      if (pc.bottom === null) {
+        // Plinth: a darker stone band from below the ground up to the floor.
+        const P0 = new THREE.Vector3(pa[0] + nx * 0.06, y0, pa[1] + nz * 0.06);
+        const P1 = new THREE.Vector3(pa[0] + nx * 0.06, floor, pa[1] + nz * 0.06);
+        const Q1 = new THREE.Vector3(pb[0] + nx * 0.06, floor, pb[1] + nz * 0.06);
+        const Q0 = new THREE.Vector3(pb[0] + nx * 0.06, y0, pb[1] + nz * 0.06);
+        B.plain.quad(
+          B.plain.vert(P0, n, u0 * 3, y0 / 3, 0.85, 0, PLINTH), B.plain.vert(P1, n, u0 * 3, floor / 3, 1, 0, PLINTH),
+          B.plain.vert(Q1, n, u0 * 3 + segLen / 3, floor / 3, 1, 0, PLINTH), B.plain.vert(Q0, n, u0 * 3 + segLen / 3, y0 / 3, 0.85, 0, PLINTH),
+        );
+      }
+      // Collision: one thin box per wall piece.
+      const cb = pc.bottom ?? y0;
+      if (segLen > 0.3) {
+        physics.tag(physics.addBox({
+          x: (pa[0] + pb[0]) / 2 - nx * 0.25, y: (cb + top) / 2, z: (pa[1] + pb[1]) / 2 - nz * 0.25,
+          hx: segLen / 2, hy: (top - cb) / 2, hz: 0.3, rotY: Math.atan2(-dz, dx),
+        }), 'rock');
+      }
+    }
+  }
+  // Passage sides and ceiling.
+  for (const ps of passages) {
+    const len = Math.hypot(ps.p1[0] - ps.p0[0], ps.p1[1] - ps.p0[1]);
+    const px = -ps.uz;
+    const pz = ps.ux;
+    const ry = Math.atan2(-ps.uz, ps.ux);
+    for (const side of [-1, 1]) {
+      const ox = px * 1.3 * side;
+      const oz = pz * 1.3 * side;
+      const inward = new THREE.Vector3(-px * side, 0, -pz * side);
+      const q0 = new THREE.Vector3(ps.p0[0] + ox, pad - 0.2, ps.p0[1] + oz);
+      const q1 = new THREE.Vector3(ps.p0[0] + ox, pad + passH, ps.p0[1] + oz);
+      const q2 = new THREE.Vector3(ps.p1[0] + ox, pad + passH, ps.p1[1] + oz);
+      const q3 = new THREE.Vector3(ps.p1[0] + ox, pad - 0.2, ps.p1[1] + oz);
+      const verts = [q0, q1, q2, q3].map((v, k) => B.plain.vert(v, inward, (k >= 2 ? len : 0) / 3, v.y / 3, k % 3 === 0 ? 0.8 : 0.95, 0, wall));
+      if (side > 0) B.plain.quad(verts[3], verts[2], verts[1], verts[0]);
+      else B.plain.quad(verts[0], verts[1], verts[2], verts[3]);
+      physics.tag(physics.addBox({ x: (ps.p0[0] + ps.p1[0]) / 2 + px * 1.42 * side, y: pad + passH / 2, z: (ps.p0[1] + ps.p1[1]) / 2 + pz * 1.42 * side, hx: len / 2, hy: passH / 2 + 0.2, hz: 0.12, rotY: ry }), 'rock');
+    }
+    const down = new THREE.Vector3(0, -1, 0);
+    const corners = [[-1, 0], [1, 0], [1, 1], [-1, 1]].map(([s, t]) => {
+      const bx = ps.p0[0] + (ps.p1[0] - ps.p0[0]) * t + px * 1.3 * s;
+      const bz = ps.p0[1] + (ps.p1[1] - ps.p0[1]) * t + pz * 1.3 * s;
+      return B.plain.vert(new THREE.Vector3(bx, pad + passH, bz), down, bx / 3, bz / 3, 0.9, 0, CEILING);
+    });
+    B.plain.quad(corners[0], corners[1], corners[2], corners[3]);
+    B.plain.quad(corners[0], corners[3], corners[2], corners[1]);
   }
 
   // Roof.
@@ -631,6 +783,7 @@ function findEntrance(b: BuildingData, ground: CampusGround, floor: number): Ent
     const other = buildingAt(qx, qz);
     if (other && other !== b && pointInPoly(qx, qz, other.pts)) score += 100;
     if (ground.classAt(qx, qz) === CLS.building) score += 50;
+    if (DATA.lines.some((l) => l.tunnel && l.pts.some((p, k) => k > 0 && segDist(mx, mz, l.pts[k - 1], p).d < 4))) score += 80;
     if (score < bestScore) {
       bestScore = score;
       best = { x: mx + nx * 2.4, z: mz + nz * 2.4, y: ground.heightAt(mx + nx * 2.4, mz + nz * 2.4), facing: Math.atan2(nx, nz), doorX: mx, doorZ: mz, building: b };
@@ -673,25 +826,51 @@ function pathAngle(x: number, z: number): number {
   return -nearestPath(x, z).ang;
 }
 
-function addDoor(group: THREE.Group, e: Entrance, label: string, floor: number, physics: PhysicsWorld): void {
+function addDoor(group: THREE.Group, e: Entrance, label: string, floor: number, physics: PhysicsWorld, ground: CampusGround, open = false): void {
   const yaw = e.facing;
   const fx = Math.sin(yaw);
   const fz = Math.cos(yaw);
-  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 2.3), new THREE.MeshStandardMaterial({ color: '#4a3424', roughness: 0.7 }));
-  door.position.set(e.doorX + fx * 0.04, floor + 1.15, e.doorZ + fz * 0.04);
-  door.rotation.y = yaw;
-  group.add(door);
-  const frame = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.5), new THREE.MeshStandardMaterial({ color: '#2b2722', roughness: 0.8 }));
-  frame.position.set(e.doorX + fx * 0.03, floor + 1.25, e.doorZ + fz * 0.03);
-  frame.rotation.y = yaw;
-  group.add(frame);
-  // Entrance step.
-  const step = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.5, 1.4), new THREE.MeshStandardMaterial({ color: '#9b968c', roughness: 0.9 }));
-  step.position.set(e.doorX + fx * 0.7, floor - 0.2, e.doorZ + fz * 0.7);
-  step.rotation.y = yaw;
-  step.receiveShadow = true;
-  group.add(step);
-  physics.addBox({ x: step.position.x, y: step.position.y, z: step.position.z, hx: 1.4, hy: 0.25, hz: 0.7, rotY: yaw });
+  if (!open) {
+    // A closed door painted on the wall (buildings without an interior).
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 2.3), new THREE.MeshStandardMaterial({ color: '#4a3424', roughness: 0.7 }));
+    door.position.set(e.doorX + fx * 0.04, floor + 1.15, e.doorZ + fz * 0.04);
+    door.rotation.y = yaw;
+    group.add(door);
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.5), new THREE.MeshStandardMaterial({ color: '#2b2722', roughness: 0.8 }));
+    frame.position.set(e.doorX + fx * 0.03, floor + 1.25, e.doorZ + fz * 0.03);
+    frame.rotation.y = yaw;
+    group.add(frame);
+  }
+  // Entrance: a landing at floor level, then equal steps (at most 16 cm) down to
+  // wherever the ground actually is at their foot (a platform, a path, a stairway).
+  const stepMat = new THREE.MeshStandardMaterial({ color: '#a39e94', roughness: 0.9 });
+  const flights: [number, number, number][] = [[0, 1.1, 0]];
+  let count = 3;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const foot = 1.1 + count * 0.32 + 0.15;
+    const g = ground.heightAt(e.doorX + fx * foot, e.doorZ + fz * foot);
+    const want = Math.max(1, Math.ceil(Math.max(0, floor - g) / 0.16));
+    if (want === count) break;
+    count = Math.min(12, want);
+  }
+  {
+    const foot = 1.1 + count * 0.32 + 0.15;
+    const drop = Math.max(0.15, floor - ground.heightAt(e.doorX + fx * foot, e.doorZ + fz * foot));
+    for (let k = 1; k <= count; k += 1) flights.push([1.1 + (k - 1) * 0.32, 0.32, (drop * k) / (count + 1)]);
+  }
+  for (const [from, depth, down] of flights) {
+    const top = floor - down;
+    const bottom = floor - 1.1 - count * 0.16;
+    const w = down === 0 ? 3.2 : 2.8;
+    const d = from + depth / 2;
+    const step = new THREE.Mesh(new THREE.BoxGeometry(w, top - bottom, depth), stepMat);
+    step.position.set(e.doorX + fx * d, (top + bottom) / 2, e.doorZ + fz * d);
+    step.rotation.y = yaw;
+    step.castShadow = true;
+    step.receiveShadow = true;
+    group.add(step);
+    if (top > bottom + 0.2) physics.addBox({ x: step.position.x, y: step.position.y, z: step.position.z, hx: w / 2, hy: (top - bottom) / 2, hz: depth / 2, rotY: yaw });
+  }
   if (!label) return;
   const tex = signTexture(
     [
@@ -975,8 +1154,19 @@ function sports(kit: Kit, ground: CampusGround, physics: PhysicsWorld, pts: Pt[]
 
 // ==================================================================== walls and gate
 
-function linearBarrier(kit: Kit, ground: CampusGround, physics: PhysicsWorld, pts: Pt[], kind: 'wall' | 'fence', gaps: { x: number; z: number; r: number }[] = []): void {
-  const h = kind === 'wall' ? 1.6 : 1.4;
+/**
+ * Walls and fences, built in 3 m bays that step with the ground (each bay level,
+ * as masons build on a slope).
+ *  - wall: plastered masonry, 1.2 m, with brick pillars at every bay, a coping,
+ *    and an iron grill on top between the pillars (the campus boundary).
+ *  - fence: galvanised posts, top rail and chain-link mesh.
+ */
+function linearBarrier(
+  kit: Kit, ground: CampusGround, physics: PhysicsWorld, pts: Pt[], kind: 'wall' | 'fence',
+  gaps: { x: number; z: number; r: number }[] = [], panels?: { grill: Panels; chain: Panels }, fenceH = 1.8,
+): void {
+  const wallH = 1.2;
+  const grillH = 0.7;
   for (let i = 0; i < pts.length - 1; i += 1) {
     const a = pts[i];
     const b = pts[i + 1];
@@ -992,21 +1182,33 @@ function linearBarrier(kit: Kit, ground: CampusGround, physics: PhysicsWorld, pt
       if (Math.abs(mx) > WORLD_HALF - 4 || Math.abs(mz) > WORLD_HALF - 4) continue;
       const seg = Math.hypot(x1 - x0, z1 - z0);
       const ry = Math.atan2(-(z1 - z0), x1 - x0);
-      const y = Math.min(ground.heightAt(x0, z0), ground.heightAt(x1, z1)) - 0.3;
+      const gy = Math.min(ground.heightAt(x0, z0), ground.heightAt(mx, mz), ground.heightAt(x1, z1));
+      const base = gy - 0.35;
       if (kind === 'wall') {
-        kit.box('white', seg + 0.02, h + 0.3, 0.24, mx, y, mz, ry);
-        kit.box('brick', seg + 0.04, 0.1, 0.32, mx, y + h + 0.3, mz, ry);
+        // Body, coping, pillar at the bay start, and the grill above.
+        kit.box('white', seg + 0.02, wallH + 0.35, 0.23, mx, base, mz, ry);
+        kit.box('concrete', seg + 0.04, 0.08, 0.32, mx, gy + wallH, mz, ry);
+        kit.box('brick', 0.4, wallH + grillH + 0.5, 0.4, x0, base, z0, ry);
+        kit.box('concrete', 0.48, 0.08, 0.48, x0, gy + wallH + grillH + 0.15, z0, ry);
+        panels?.grill.add(x0, z0, x1, z1, gy + wallH + 0.08, grillH, 0);
+        physics.addBox({ x: mx, y: gy + (wallH + grillH) / 2, z: mz, hx: seg / 2, hy: (wallH + grillH) / 2 + 0.35, hz: 0.18, rotY: ry });
       } else {
-        kit.box('metal', 0.07, h + 0.3, 0.07, x0, y, z0, ry);
-        for (const hh of [0.45, 0.9, 1.35]) kit.box('metal', seg, 0.03, 0.03, mx, y + 0.3 + hh, mz, ry);
+        kit.box('metal', 0.06, fenceH + 0.35, 0.06, x0, base, z0, ry);
+        kit.box('metal', seg, 0.04, 0.04, mx, gy + fenceH - 0.02, mz, ry);
+        panels?.chain.add(x0, z0, x1, z1, gy + 0.02, fenceH - 0.04, 0);
+        physics.addBox({ x: mx, y: gy + fenceH / 2, z: mz, hx: seg / 2, hy: fenceH / 2 + 0.35, hz: 0.12, rotY: ry });
       }
-      physics.addBox({ x: mx, y: y + (h + 0.3) / 2, z: mz, hx: seg / 2, hy: (h + 0.3) / 2 + 0.4, hz: 0.18, rotY: ry });
+      // Closing pillar or post at the very end of the run.
+      if (s === steps - 1 && i === pts.length - 2) {
+        if (kind === 'wall') kit.box('brick', 0.4, wallH + grillH + 0.5, 0.4, x1, base, z1, ry);
+        else kit.box('metal', 0.06, fenceH + 0.35, 0.06, x1, base, z1, ry);
+      }
     }
   }
 }
 
 /** Boundary wall along the campus outline, open wherever a road or footpath crosses it. */
-function boundaryWall(kit: Kit, ground: CampusGround, physics: PhysicsWorld): void {
+function boundaryWall(kit: Kit, ground: CampusGround, physics: PhysicsWorld, panels: { grill: Panels; chain: Panels }): void {
   const ring = [...DATA.boundary, DATA.boundary[0]];
   const gaps: { x: number; z: number; r: number }[] = [{ x: GATE[0], z: GATE[1], r: 9 }];
   for (const l of DATA.lines) {
@@ -1022,7 +1224,210 @@ function boundaryWall(kit: Kit, ground: CampusGround, physics: PhysicsWorld): vo
       for (let j = 0; j < ring.length - 1; j += 1) if (segDist(e[0], e[1], ring[j], ring[j + 1]).d < 2.5) gaps.push({ x: e[0], z: e[1], r: 3.5 });
     }
   }
-  linearBarrier(kit, ground, physics, ring, 'wall', gaps);
+  linearBarrier(kit, ground, physics, ring, 'wall', gaps, panels);
+}
+
+/**
+ * A flight of stairs along an OSM steps line: concrete treads of equal rise on
+ * the graded incline (the ground beneath is the walking surface), side cheeks and
+ * a steel handrail on each side.
+ */
+function stairs(kit: Kit, ground: CampusGround, pts: Pt[], width: number): void {
+  const s = [0];
+  for (let i = 1; i < pts.length; i += 1) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const len = s[s.length - 1];
+  if (len < 1) return;
+  const at = (d: number): { x: number; z: number; ry: number } => {
+    let i = 1;
+    while (i < s.length - 1 && s[i] < d) i += 1;
+    const t = (d - s[i - 1]) / Math.max(1e-6, s[i] - s[i - 1]);
+    const a = pts[i - 1];
+    const b = pts[i];
+    return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t, ry: Math.atan2(-(b[1] - a[1]), b[0] - a[0]) };
+  };
+  const h = (d: number) => {
+    const p = at(d);
+    return ground.heightAt(p.x, p.z);
+  };
+  const drop = h(len) - h(0);
+  const n = Math.max(2, Math.min(Math.floor(len / 0.28), Math.round(Math.abs(drop) / 0.16)));
+  const w = Math.max(1.4, width * 0.85);
+  for (let k = 0; k < n; k += 1) {
+    const d0 = (k / n) * len;
+    const d1 = ((k + 1) / n) * len;
+    const p = at((d0 + d1) / 2);
+    const top = Math.max(h(d0), h(d1)) + 0.04;
+    const bottom = Math.min(h(d0), h(d1)) - 0.35;
+    // Box length runs along the line (local x), width across it.
+    kit.add('concrete', new THREE.BoxGeometry(d1 - d0 + 0.02, top - bottom, w), p.x, (top + bottom) / 2, p.z, p.ry);
+    for (const side of [-1, 1]) {
+      const ox = Math.sin(p.ry) * (w / 2 + 0.12) * side;
+      const oz = Math.cos(p.ry) * (w / 2 + 0.12) * side;
+      kit.add('white', new THREE.BoxGeometry(d1 - d0 + 0.02, top - bottom + 0.3, 0.22), p.x + ox, (top + bottom + 0.3) / 2, p.z + oz, p.ry);
+    }
+  }
+  // Handrails: posts every ~1.8 m and a sloped rail between their tops.
+  const posts = Math.max(2, Math.round(len / 1.8) + 1);
+  for (const side of [-1, 1]) {
+    let prev: THREE.Vector3 | null = null;
+    for (let k = 0; k < posts; k += 1) {
+      const d = (k / (posts - 1)) * len;
+      const p = at(d);
+      const ox = Math.sin(p.ry) * (w / 2 + 0.12) * side;
+      const oz = Math.cos(p.ry) * (w / 2 + 0.12) * side;
+      const y = h(d) + 0.3;
+      kit.cyl('metal', 0.025, 0.9, p.x + ox, y, p.z + oz, 6);
+      const topP = new THREE.Vector3(p.x + ox, y + 0.9, p.z + oz);
+      if (prev) {
+        const dx = topP.x - prev.x;
+        const dy = topP.y - prev.y;
+        const dz = topP.z - prev.z;
+        const run = Math.hypot(dx, dz);
+        kit.add('metal', new THREE.BoxGeometry(Math.hypot(run, dy) + 0.04, 0.045, 0.045), (topP.x + prev.x) / 2, (topP.y + prev.y) / 2, (topP.z + prev.z) / 2, Math.atan2(-dz, dx), 0, Math.atan2(dy, run));
+      }
+      prev = topP;
+    }
+  }
+}
+
+/**
+ * Concrete spectator tiers on a stand (the WRC parapet), stepping down to the
+ * field, built in 3 m blocks so the real stairways that cross the stand stay open.
+ */
+function standTiers(kit: Kit, ground: CampusGround, physics: PhysicsWorld): void {
+  const steps = DATA.lines.filter((l) => l.kind === 'steps');
+  for (const t of ground.tiers) {
+    const ry = Math.atan2(-t.uz, t.ux);
+    const nU = Math.max(1, Math.ceil((t.halfLen * 2) / 3));
+    const du = (t.halfLen * 2) / nU;
+    const dv = t.depth / t.count;
+    for (let k = 0; k < t.count; k += 1) {
+      const top = t.lower + (k + 1) * t.rise;
+      const bottom = t.lower + k * t.rise - 0.5;
+      const vm = (k + 0.5) * dv;
+      for (let j = 0; j < nU; j += 1) {
+        const um = -t.halfLen + (j + 0.5) * du;
+        const x = t.ox + t.ux * um + t.vx * vm;
+        const z = t.oz + t.uz * um + t.vz * vm;
+        if (steps.some((l) => l.pts.some((p, i) => i > 0 && segDist(x, z, l.pts[i - 1], p).d < 2.2))) continue;
+        kit.add('concrete', new THREE.BoxGeometry(du + 0.01, top - bottom, dv + 0.01), x, (top + bottom) / 2, z, ry);
+        physics.addBox({ x, y: (top + bottom) / 2, z, hx: du / 2, hy: (top - bottom) / 2, hz: dv / 2, rotY: ry });
+      }
+    }
+  }
+}
+
+/** Steep graded banks get stone pitching (dry masonry), as hillside campuses here do. */
+function paintBanks(canvas: HTMLCanvasElement, ground: CampusGround): void {
+  const ctx = canvas.getContext('2d')!;
+  const S = canvas.width;
+  const px = S / (WORLD_HALF * 2);
+  const rng = mulberry32(77);
+  const cell = 1;
+  for (let z = -WORLD_HALF; z < WORLD_HALF; z += cell) {
+    for (let x = -WORLD_HALF; x < WORLD_HALF; x += cell) {
+      const slope = ground.slopeAt(x + 0.5, z + 0.5);
+      if (slope < 0.7) continue;
+      if (ground.classAt(x + 0.5, z + 0.5) === CLS.building) continue;
+      // Grey-brown stones with darker mortar lines; steeper = more stone, less grass.
+      const k = Math.min(1, (slope - 0.7) / 0.4);
+      const v = 120 + Math.floor(rng() * 50);
+      ctx.globalAlpha = 0.55 + 0.4 * k;
+      ctx.fillStyle = `rgb(${v + 8},${v + 2},${v - 10})`;
+      ctx.fillRect((x + WORLD_HALF) * px, (z + WORLD_HALF) * px, cell * px + 0.5, cell * px + 0.5);
+      ctx.fillStyle = 'rgba(60,56,50,0.7)';
+      const sx = (x + WORLD_HALF) * px;
+      const sz = (z + WORLD_HALF) * px;
+      ctx.fillRect(sx, sz + cell * px * (0.3 + rng() * 0.4), cell * px, Math.max(1, px * 0.06));
+      ctx.fillRect(sx + cell * px * rng(), sz, Math.max(1, px * 0.06), cell * px);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** Textured see-through panels (grills, chain-link): quads between two points, merged into one mesh. */
+class Panels {
+  private pos: number[] = [];
+  private uv: number[] = [];
+  private nrm: number[] = [];
+
+  /** A vertical panel from (x0, z0) to (x1, z1), bottom at y, height h; u repeats per metre. */
+  add(x0: number, z0: number, x1: number, z1: number, y: number, h: number, inset: number): void {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    if (len < 0.05) return;
+    const ux = (x1 - x0) / len;
+    const uz = (z1 - z0) / len;
+    const a = [x0 + ux * inset, z0 + uz * inset];
+    const b = [x1 - ux * inset, z1 - uz * inset];
+    const u1 = len - 2 * inset;
+    const quad = [[a[0], y, a[1], 0, 0], [b[0], y, b[1], u1, 0], [b[0], y + h, b[1], u1, 1], [a[0], y + h, a[1], 0, 1]];
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      const q = quad[i];
+      this.pos.push(q[0], q[1], q[2]);
+      this.uv.push(q[3], q[4]);
+      this.nrm.push(uz, 0, -ux);
+    }
+  }
+
+  build(group: THREE.Group, tex: THREE.Texture, name: string): void {
+    if (!this.pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.55, metalness: 0.5 }));
+    m.castShadow = true;
+    m.receiveShadow = true;
+    m.name = name;
+    group.add(m);
+  }
+}
+
+/** Iron grill: vertical bars (about 11 cm apart) between two flat rails; repeats per metre. */
+function grillTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#26282a';
+  for (let i = 0; i < 9; i += 1) x.fillRect(i * (128 / 9) + 4, 0, 4, 128);
+  x.fillRect(0, 2, 128, 7);
+  x.fillRect(0, 119, 128, 7);
+  // Spear tips along the top rail.
+  for (let i = 0; i < 9; i += 1) x.fillRect(i * (128 / 9) + 3, 0, 6, 3);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Galvanised chain-link: a diamond weave (about 5 cm openings); repeats per metre. */
+function chainTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  x.strokeStyle = '#9aa0a2';
+  x.lineWidth = 2.2;
+  const s = 256 / 20;
+  for (let i = -20; i < 40; i += 1) {
+    x.beginPath();
+    x.moveTo(i * s, 0);
+    x.lineTo(i * s + 256, 256);
+    x.stroke();
+    x.beginPath();
+    x.moveTo(i * s, 256);
+    x.lineTo(i * s + 256, 0);
+    x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1, 1.8);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }
 
 function intersect(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {

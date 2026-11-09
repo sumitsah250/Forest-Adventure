@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><clipPath id="r"><rect width="512" height="512" rx="112"/></clipPath><g clip-path="url(#r)"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c1d22"/><stop offset="0.7" stop-color="#2a4636"/><stop offset="1" stop-color="#3b5a3b"/></linearGradient>
+      <radialGradient id="moonglow"><stop offset="0" stop-color="#f3e6b8" stop-opacity="0.35"/><stop offset="1" stop-color="#f3e6b8" stop-opacity="0"/></radialGradient></defs>
+      <rect width="512" height="512" fill="url(#sky)"/><g transform="translate(0 0) scale(1)"><circle cx="352" cy="150" r="120" fill="url(#moonglow)"/>
+      <circle cx="352" cy="150" r="54" fill="#f3e6b8"/>
+      <path d="M96 400 L132 320 L120 320 L150 262 L140 262 L168 210 L196 262 L186 262 L216 320 L204 320 L240 400Z" fill="#132219"/>
+      <path d="M300 400 L330 330 L320 330 L346 280 L338 280 L362 236 L386 280 L378 280 L404 330 L394 330 L424 400Z" fill="#132219"/>
+      <path d="M256 84 L328 196 L298 196 L354 282 L322 282 L388 392 L124 392 L190 282 L158 282 L214 196 L184 196Z" fill="#08110c"/>
+      <rect x="244" y="388" width="24" height="34" fill="#08110c"/>
+      <path d="M0 404 Q256 370 512 404 V512 H0Z" fill="#08110c"/>
+      <ellipse cx="240" cy="306" rx="8" ry="5" fill="#eef36f"/><ellipse cx="272" cy="306" rx="8" ry="5" fill="#eef36f"/>
+      <circle cx="140" cy="200" r="4" fill="#e8f58a"/><circle cx="410" cy="250" r="3.5" fill="#e8f58a"/><circle cx="96" cy="300" r="3" fill="#e8f58a"/></g></g></svg>
