@@ -1,0 +1,13 @@
+# For Coolify's "Docker Compose" build pack (or `docker compose up -d --build` on any server).
+# Set the domain on the "game" service in Coolify, e.g. https://play.example.com.
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

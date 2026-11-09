@@ -70,7 +70,9 @@ async function asset(request, path, hash) {
   const key = new URL(`${path}?v=${hash}`, scope).href;
   const hit = await cache.match(key);
   if (hit) return hit;
-  const res = await fetch(request);
+  // Revalidate with the server: a changed file keeps its name, so the browser's HTTP
+  // cache could otherwise hand back last release's copy.
+  const res = await fetch(request, { cache: 'no-cache' });
   if (res.ok && res.status === 200) cache.put(key, res.clone());
   return res;
 }
