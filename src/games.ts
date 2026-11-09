@@ -10,6 +10,10 @@ export interface GameEntry {
   icon: string;
   tag: string;
   blurb: string;
+  /** Install page, Campus Quest title-screen style: where it is set, a longer intro and an overview picture (under public/). */
+  place?: string;
+  intro?: string;
+  cover?: string;
   /** Files (or folders, ending in "/") under public/ that the game loads, including ones loaded mid-game. */
   assets: string[];
 }
@@ -23,6 +27,10 @@ export const GAMES: GameEntry[] = [
     icon: 'icons/campus-512.png',
     tag: 'Adventure · Quiz',
     blurb: 'Explore IOE Pashchimanchal Campus, Pokhara. Solve each department’s challenge and graduate.',
+    place: 'IOE Pashchimanchal Campus · Lamachaur, Pokhara',
+    intro: 'Your first day as an engineering student. Explore the real campus, find each department, solve its challenge and earn your degree — ten levels from Admission Day to Convocation.',
+    // Title-screen aerial view; regenerate with `npm run overview`.
+    cover: 'images/campus-overview.jpg',
     assets: [
       'assets/models/player/sumit_character.glb',
       // Quest props placed during levels (src/campus/quest.ts).

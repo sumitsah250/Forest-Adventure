@@ -26,31 +26,37 @@ const params = new URLSearchParams(location.search);
 const appMode = isStandalone() || params.has('app');
 const base = new URL('./', location.href);
 
+const lead = GAMES[0];
+const backdrop = GAMES.find((g) => g.cover)?.cover;
+// With one game its card is the download panel: overview picture, install / download state, Play.
+const card = (g: (typeof GAMES)[number]) => `
+        <article class="lx-card">
+          ${g.cover ? `<img class="lx-card__shot" src="${g.cover}" alt="Overview of ${g.name}" width="1600" height="900" />` : ''}
+          <div class="lx-card__row">
+            <img class="lx-card__icon" src="${g.icon}" alt="" width="56" height="56" />
+            <div class="lx-card__body">
+              <div class="lx-card__tag">${g.tag}</div>
+              <h2 class="lx-card__name">${g.name}</h2>
+            </div>
+          </div>
+          ${single ? '<div class="lx-get"><h3 class="lx__title"></h3><p class="lx__lede"></p><div class="lx__action" aria-live="polite"></div></div>' : `<p class="lx-card__blurb">${g.blurb}</p>`}
+          <a class="lx-card__play" href="${g.href}" aria-disabled="true">Play</a>
+        </article>`;
+
+// Laid out like Campus Quest's title screen: the campus behind, a centred title, then the download.
 const root = document.getElementById('launcher') as HTMLDivElement;
 root.innerHTML = `
   <main class="lx ${appMode ? 'lx--app' : 'lx--web'}">
-    <div class="lx__sky" aria-hidden="true"></div>
-    <header class="lx__brand"><img src="${single ? GAMES[0].icon : 'icons/app-192.png'}" alt="" width="34" height="34" /><span>Sumix Developers</span></header>
+    <div class="lx__sky" aria-hidden="true">${backdrop ? `<img src="${backdrop}" alt="" />` : ''}</div>
     <section class="lx__hero">
-      <h1 class="lx__title"></h1>
-      <p class="lx__lede"></p>
-      <div class="lx__action" aria-live="polite"></div>
+      <div class="lx__studio">Sumix Developers presents</div>
+      <h1 class="lx__name">${single ? lead.name : 'Sumix Games'}</h1>
+      <div class="lx__place">${single ? (lead.place ?? lead.tag) : 'Two games · one install'}</div>
+      <p class="lx__intro">${single ? (lead.intro ?? lead.blurb) : 'Install once and the games download to your device. They open full screen, load fast and play offline.'}</p>
     </section>
-    <section class="lx__games" aria-label="Games">
-      ${GAMES.map(
-        (g) => `
-        <article class="lx-card">
-          <img class="lx-card__icon" src="${g.icon}" alt="" width="72" height="72" />
-          <div class="lx-card__body">
-            <div class="lx-card__tag">${g.tag}</div>
-            <h2 class="lx-card__name">${g.name}</h2>
-            <p class="lx-card__blurb">${g.blurb}</p>
-          </div>
-          <a class="lx-card__play" href="${g.href}" aria-disabled="true">Play</a>
-        </article>`,
-      ).join('')}
-    </section>
-    <footer class="lx__foot">© Sumix Developers · Runs on your device · Plays offline once downloaded</footer>
+    ${single ? '' : '<section class="lx-get lx-get--solo"><h3 class="lx__title"></h3><p class="lx__lede"></p><div class="lx__action" aria-live="polite"></div></section>'}
+    <section class="lx__games" aria-label="${single ? 'Download' : 'Games'}">${GAMES.map(card).join('')}</section>
+    <footer class="lx__foot">© Sumix Developers · Runs on your device · Plays offline once downloaded${single && lead.id === 'campus' ? '<br />Campus map © OpenStreetMap contributors (ODbL) · Footprints © Microsoft (ODbL) · Elevation: SRTM' : ''}</footer>
   </main>`;
 
 const title = root.querySelector('.lx__title') as HTMLHeadingElement;
@@ -85,10 +91,10 @@ async function offlineList(): Promise<OfflineList | null> {
 
 function webMode(): void {
   if (single) {
-    title.innerHTML = `Install<br /><em>${appName}.</em>`;
-    lede.textContent = 'Install it once and it downloads to your device. After that it opens full screen, loads fast and plays offline.';
+    title.textContent = 'Install the game';
+    lede.textContent = 'It downloads to your device once. After that it opens full screen, loads fast and plays offline.';
   } else {
-    title.innerHTML = 'Two games.<br /><em>One install.</em>';
+    title.textContent = 'Two games. One install.';
     lede.textContent = 'Install Sumix Games and it downloads the games to your device. After that they open full screen, load fast and play offline.';
   }
   let sizeNote = '';
@@ -144,15 +150,17 @@ function appMode_(): void {
       </div>`;
   };
   const ready = () => {
-    title.innerHTML = single ? 'Ready to<br /><em>play.</em>' : 'Pick a game.';
+    title.textContent = single ? 'Ready to play' : 'Pick a game.';
     lede.textContent = single ? `${appName} is on your device. It loads from here, even without internet.` : 'Everything is on your device. Games load from here, even without internet.';
     action.innerHTML = `<div class="lx-done"><b>Downloaded ✓</b> ${single ? 'Tap Play to start.' : 'All games are on this device.'}</div>`;
     setPlayable(true);
   };
 
-  title.innerHTML = single ? `Getting ${appName}<br /><em>ready.</em>` : 'Getting your<br /><em>games ready.</em>';
-  lede.textContent = 'A one-time download. Keep the app open until it finishes; next time it opens straight away.';
-  setPlayable(false, 'Downloading…');
+  title.textContent = single ? 'Getting the game ready' : 'Getting your games ready';
+  // No need to wait: the service worker stores every file the game loads under the same key as this download, so
+  // playing now saves what it uses and the next launch only fetches what is still missing.
+  lede.textContent = 'A one-time download so it plays offline. You can start now: whatever is still missing loads as you play.';
+  setPlayable(true, 'Play now');
   panel();
 
   let running = false;
@@ -238,7 +246,7 @@ async function downloadAll(): Promise<void> {
       update();
     }
   };
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await Promise.all(Array.from({ length: 6 }, worker));
   paint();
   store(DONE_KEY, list.version);
 }
