@@ -10,7 +10,7 @@ import { loadPbr } from '../render/textures.ts';
 import type { PhysicsWorld } from '../physics/physics.ts';
 import type { GraphicsPreset } from '../core/settings.ts';
 import type { FoliageAtlas } from '../render/foliageAtlas.ts';
-import { broadleaf, bush, pine, type PlantModel } from '../world/treeGen.ts';
+import { broadleaf, bush, pine, type PlantModel, type TreeLod } from '../world/treeGen.ts';
 import { barkMaterial, foliageDepthMaterial, foliageMaterial } from '../render/foliageMaterial.ts';
 import { mulberry32, range, hash2 } from '../world/rng.ts';
 import { signTexture } from '../world/build.ts';
@@ -138,6 +138,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     return e;
   };
   for (const b of DATA.buildings) if (b.inside && b.name && !/[^\x20-\x7e]/.test(b.name) && polyArea(b.pts) !== 0) entranceFor(b, signName(b.name));
+  mergeUntextured(signGroup);
 
   // ------------------------------------------------------------------ walls, gate, props
   o.progress(0.45, 'Building walls and the main gate');
@@ -195,7 +196,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
 
   // ------------------------------------------------------------------ trees
   o.progress(0.65, 'Planting trees');
-  plantTrees(group, o, ground, physics);
+  const updateTrees = plantTrees(group, o, ground, physics);
   await nextFrame();
 
   // ------------------------------------------------------------------ backdrop
@@ -211,6 +212,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     flag,
     update(t: number, camera: THREE.Camera) {
       backdrop.position.set(camera.position.x, 0, camera.position.z);
+      updateTrees(camera);
       if (flag) {
         const pos = flag.geometry.getAttribute('position') as THREE.BufferAttribute;
         const base = flag.userData.base as Float32Array;
@@ -222,6 +224,41 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
       }
     },
   };
+}
+
+/**
+ * Merges a group's untextured child meshes that look the same (colour, roughness, shadows) into one mesh each. The
+ * entrances are a few hundred separate steps, doors and frames otherwise: a draw call each, twice with shadows.
+ */
+function mergeUntextured(group: THREE.Group): void {
+  const byKey = new Map<string, { mat: THREE.MeshStandardMaterial; meshes: THREE.Mesh[] }>();
+  for (const child of group.children) {
+    if (!(child instanceof THREE.Mesh) || Array.isArray(child.material)) continue;
+    const m = child.material as THREE.MeshStandardMaterial;
+    if (!m.isMeshStandardMaterial || m.map || m.transparent) continue;
+    const key = `${m.color.getHexString()}|${m.roughness}|${m.metalness}|${child.castShadow}|${child.receiveShadow}`;
+    const e = byKey.get(key) ?? { mat: m, meshes: [] };
+    e.meshes.push(child);
+    byKey.set(key, e);
+  }
+  for (const { mat, meshes } of byKey.values()) {
+    if (meshes.length < 2) continue;
+    const geos = meshes.map((mesh) => {
+      mesh.updateMatrix();
+      return mesh.geometry.clone().applyMatrix4(mesh.matrix);
+    });
+    const geo = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!geo) continue;
+    const merged = new THREE.Mesh(geo, mat);
+    merged.castShadow = meshes[0].castShadow;
+    merged.receiveShadow = meshes[0].receiveShadow;
+    for (const mesh of meshes) {
+      group.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    group.add(merged);
+  }
 }
 
 function nextFrame(): Promise<void> {
@@ -1489,18 +1526,25 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
 
 // ==================================================================== trees
 
-function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, physics: PhysicsWorld): void {
+/**
+ * Trees and shrubs, instanced per model part. Each frame only the instances the camera can see are drawn: every tree
+ * within shadow range (so trees behind the camera still cast shadows into view) at full detail, and beyond that the
+ * ones inside the view at the low level of detail, which shares the silhouette. Returns the per-frame update.
+ */
+function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, physics: PhysicsWorld): (camera: THREE.Camera) => void {
   const { atlas, preset } = o;
   const r = atlas.regions;
-  const models: PlantModel[] = [
-    broadleaf(411, 11, r.leafA, 'mid'),
-    broadleaf(412, 14, r.leafB, 'mid'),
-    broadleaf(413, 9, r.leafA, 'mid'),
-    broadleaf(414, 16, r.leafB, 'mid'),
-    broadleaf(415, 12, r.leafA, 'mid'),
-    pine(311, atlas, 17, 'mid'),
-    pine(312, atlas, 21, 'mid'),
+  const variants = (lod: TreeLod): PlantModel[] => [
+    broadleaf(411, 11, r.leafA, lod),
+    broadleaf(412, 14, r.leafB, lod),
+    broadleaf(413, 9, r.leafA, lod),
+    broadleaf(414, 16, r.leafB, lod),
+    broadleaf(415, 12, r.leafA, lod),
+    pine(311, atlas, 17, lod),
+    pine(312, atlas, 21, lod),
   ];
+  const models = variants(preset.terrainLow ? 'low' : 'mid');
+  const farModels = variants('low');
   const bushes: PlantModel[] = [bush(431, r.leafA, 1.5), bush(432, r.leafB, 1.1), bush(433, r.leafA, 1.9)];
   const leafMat = foliageMaterial({ map: atlas.texture, name: 'campus-leaves', windScale: 0.3, translucency: 0.5, roughness: 0.7 });
   const leafDepth = foliageDepthMaterial(atlas.texture, 0.42, 0.3);
@@ -1593,42 +1637,121 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
     trees.push({ x, z, m: rng() < 0.3 ? 5 + Math.floor(rng() * 2) : broad(), s: range(rng, 0.8, 1.35) });
   }
 
-  // Instanced meshes per model part.
+  // Instanced meshes per model part, near (full detail, casts shadows) and far (low detail).
+  const nearR = preset.shadowRange + 10;
+  // Beyond this nothing is drawn: on Low only (phones, integrated GPUs), where the fog has thickened.
+  const maxR = preset.terrainLow ? 340 : Infinity;
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
-  const place = (list: { x: number; z: number; m: number; s: number }[], ms: PlantModel[], collide: boolean) => {
+  interface Bucket { mesh: THREE.InstancedMesh; near: boolean }
+  interface Set_ { n: number; mat: Float32Array; col: Float32Array; sphere: Float32Array; buckets: Bucket[] }
+  const sets: Set_[] = [];
+  const parts = (model: PlantModel): [THREE.BufferGeometry, THREE.Material, THREE.Material | null][] => {
+    const out: [THREE.BufferGeometry, THREE.Material, THREE.Material | null][] = [];
+    if (model.bark) out.push([model.bark.build(), model.kind === 'pine' ? barkP : barkB, null]);
+    if (model.foliage) out.push([model.foliage.build(), leafMat, leafDepth]);
+    return out;
+  };
+  const place = (list: { x: number; z: number; m: number; s: number }[], ms: PlantModel[], far: PlantModel[] | null, collide: boolean) => {
     ms.forEach((model, mi) => {
       const mine = list.filter((t) => t.m === mi);
       if (!mine.length) return;
-      const parts: [THREE.BufferGeometry, THREE.Material, THREE.Material | null][] = [];
-      if (model.bark) parts.push([model.bark.build(), model.kind === 'pine' ? barkP : barkB, null]);
-      if (model.foliage) parts.push([model.foliage.build(), leafMat, leafDepth]);
-      for (const [geo, mat, depth] of parts) {
-        const mesh = new THREE.InstancedMesh(geo, mat, mine.length);
-        mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(mine.length * 3), 3);
-        mine.forEach((t, i) => {
-          dummy.position.set(t.x, ground.heightAt(t.x, t.z) - 0.05, t.z);
-          dummy.rotation.set(0, hash2(t.x * 7, t.z * 7, 4) * Math.PI * 2, 0);
-          dummy.scale.setScalar(t.s);
-          dummy.updateMatrix();
-          mesh.setMatrixAt(i, dummy.matrix);
-          const v = 0.86 + hash2(t.x, t.z, 6) * 0.26;
-          col.setRGB(v, v * (0.97 + hash2(t.z, t.x, 8) * 0.06), v * 0.92);
-          mesh.setColorAt(i, col);
-        });
-        mesh.castShadow = preset.shadows;
-        mesh.receiveShadow = true;
-        mesh.frustumCulled = false;
-        if (depth) mesh.customDepthMaterial = depth;
-        group.add(mesh);
-      }
+      const n = mine.length;
+      const set: Set_ = { n, mat: new Float32Array(n * 16), col: new Float32Array(n * 3), sphere: new Float32Array(n * 4), buckets: [] };
+      const reach = Math.max(model.height * 0.55, model.crownRadius) + 1;
+      mine.forEach((t, i) => {
+        const y = ground.heightAt(t.x, t.z) - 0.05;
+        dummy.position.set(t.x, y, t.z);
+        dummy.rotation.set(0, hash2(t.x * 7, t.z * 7, 4) * Math.PI * 2, 0);
+        dummy.scale.setScalar(t.s);
+        dummy.updateMatrix();
+        dummy.matrix.toArray(set.mat, i * 16);
+        const v = 0.86 + hash2(t.x, t.z, 6) * 0.26;
+        col.setRGB(v, v * (0.97 + hash2(t.z, t.x, 8) * 0.06), v * 0.92);
+        col.toArray(set.col, i * 3);
+        set.sphere.set([t.x, y + model.height * 0.5 * t.s, t.z, reach * t.s], i * 4);
+      });
+      const add = (m: PlantModel, near: boolean) => {
+        for (const [geo, mat, depth] of parts(m)) {
+          const mesh = new THREE.InstancedMesh(geo, mat, n);
+          mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+          mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+          mesh.count = 0;
+          // Only trees within shadow range cast shadows; the far ones are past the shadow map anyway.
+          mesh.castShadow = preset.shadows && near;
+          mesh.receiveShadow = true;
+          mesh.frustumCulled = false;
+          if (depth) mesh.customDepthMaterial = depth;
+          group.add(mesh);
+          set.buckets.push({ mesh, near });
+        }
+      };
+      add(model, true);
+      add(far?.[mi] ?? model, false);
+      sets.push(set);
       if (collide && model.trunkRadius > 0) {
         for (const t of mine) physics.tag(physics.addCylinder(t.x, ground.heightAt(t.x, t.z) - 0.2, t.z, 1.8, model.trunkRadius * t.s + 0.05), 'wood');
       }
     });
   };
-  place(trees, models, true);
-  place(shrubs, bushes, false);
+  place(trees, models, farModels, true);
+  place(shrubs, bushes, null, false);
+
+  // Re-sort only when the camera has moved or turned enough; the view test is widened so small turns stay covered.
+  const frustum = new THREE.Frustum();
+  const pv = new THREE.Matrix4();
+  const lastPos = new THREE.Vector3(Infinity, 0, 0);
+  const lastDir = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const sphere = new THREE.Sphere();
+  const nearIdx = new Int32Array(Math.max(1, ...sets.map((s) => s.n)));
+  const farIdx = new Int32Array(nearIdx.length);
+  const fill = (mesh: THREE.InstancedMesh, set: Set_, idx: Int32Array, count: number) => {
+    const m = mesh.instanceMatrix.array as Float32Array;
+    const c = mesh.instanceColor!.array as Float32Array;
+    for (let k = 0; k < count; k += 1) {
+      const i = idx[k];
+      m.set(set.mat.subarray(i * 16, i * 16 + 16), k * 16);
+      c.set(set.col.subarray(i * 3, i * 3 + 3), k * 3);
+    }
+    mesh.count = count;
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.addUpdateRange(0, count * 16);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor!.clearUpdateRanges();
+    mesh.instanceColor!.addUpdateRange(0, count * 3);
+    mesh.instanceColor!.needsUpdate = true;
+  };
+  return (camera: THREE.Camera) => {
+    camera.getWorldDirection(dir);
+    if (camera.position.distanceToSquared(lastPos) < 4 && dir.dot(lastDir) > 0.9986) return;
+    lastPos.copy(camera.position);
+    lastDir.copy(dir);
+    camera.updateMatrixWorld();
+    pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(pv);
+    const { x: cx, z: cz } = camera.position;
+    for (const set of sets) {
+      let nn = 0;
+      let nf = 0;
+      const sp = set.sphere;
+      for (let i = 0; i < set.n; i += 1) {
+        const dx = sp[i * 4] - cx;
+        const dz = sp[i * 4 + 2] - cz;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d < nearR) {
+          nearIdx[nn++] = i;
+          continue;
+        }
+        if (d > maxR) continue;
+        sphere.center.set(sp[i * 4], sp[i * 4 + 1], sp[i * 4 + 2]);
+        sphere.radius = sp[i * 4 + 3] + d * 0.06 + 2;
+        if (frustum.intersectsSphere(sphere)) farIdx[nf++] = i;
+      }
+      for (const b of set.buckets) fill(b.mesh, set, b.near ? nearIdx : farIdx, b.near ? nn : nf);
+    }
+  };
 }
 
 // ==================================================================== mountains

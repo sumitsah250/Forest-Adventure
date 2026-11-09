@@ -78,17 +78,25 @@ for (const b of DATA.buildings) {
 function clearRoads(list: BuildingData[]): BuildingData[] {
   const ROADS = new Set(['primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'service', 'track', 'living_street']);
   const PATHS = new Set(['footway', 'path', 'pedestrian', 'steps', 'cycleway']);
+  const lines = DATA.lines.filter((l) => !l.tunnel && !l.area && (ROADS.has(l.kind) || PATHS.has(l.kind)));
+  // Bounding boxes first: a segment can only run through a footprint whose box it overlaps. (This used to test every
+  // segment of every road against every building and took seconds of the loading screen, much longer on phones.)
+  const lineBox = lines.map((l) => box(l.pts));
   const out: BuildingData[] = [];
   for (const b of list) {
     let pts = b.pts;
     let keep = true;
     for (let pass = 0; pass < 3 && keep; pass += 1) {
       let fix: { nx: number; nz: number; d: number } | null = null;
-      for (const l of DATA.lines) {
-        if (l.tunnel || l.area || !(ROADS.has(l.kind) || PATHS.has(l.kind))) continue;
+      const [bx0, bz0, bx1, bz1] = box(pts);
+      for (let li = 0; li < lines.length; li += 1) {
+        const l = lines[li];
+        const lb = lineBox[li];
+        if (lb[2] < bx0 || lb[0] > bx1 || lb[3] < bz0 || lb[1] > bz1) continue;
         for (let i = 0; i < l.pts.length - 1 && !fix; i += 1) {
           const a = l.pts[i];
           const c = l.pts[i + 1];
+          if (Math.max(a[0], c[0]) < bx0 || Math.min(a[0], c[0]) > bx1 || Math.max(a[1], c[1]) < bz0 || Math.min(a[1], c[1]) > bz1) continue;
           const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
           if (len < 0.01) continue;
           // Does this segment run through the footprint?
@@ -120,6 +128,15 @@ function clearRoads(list: BuildingData[]): BuildingData[] {
     if (keep) out.push(pts === b.pts ? b : { ...b, pts });
   }
   return out;
+}
+
+/** Axis-aligned bounds [minX, minZ, maxX, maxZ]. */
+function box(pts: Pt[]): [number, number, number, number] {
+  let a = Infinity, c = Infinity, d = -Infinity, e = -Infinity;
+  for (const [x, z] of pts) {
+    a = Math.min(a, x); c = Math.min(c, z); d = Math.max(d, x); e = Math.max(e, z);
+  }
+  return [a, c, d, e];
 }
 
 /**

@@ -45,6 +45,8 @@ async function boot(): Promise<void> {
   const preset = PRESETS[settings.quality];
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: preset.antialias, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: params.has('test') });
+  // Reading each shader's error log makes the browser wait for every compile in turn (seconds on phones).
+  renderer.debug.checkShaderErrors = import.meta.env.DEV;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   if (preset.grading) installGrade(renderer);
@@ -54,10 +56,15 @@ async function boot(): Promise<void> {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.08, 1600);
   camera.rotation.order = 'YXZ';
+  // Phones and tablets: their screens have 2-3x more pixels than their GPUs can fill at 60 fps, and on a small screen
+  // CSS-pixel resolution looks fine. The adaptive scale below lowers it further if frames still run slow.
+  const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+  const maxRatio = touchDevice ? 1 : 1.5;
+  let resScale = 1;
   const resize = () => {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    renderer.setPixelRatio(Math.min(Math.min(window.devicePixelRatio || 1, 2) * preset.pixelRatio, 1.5));
+    renderer.setPixelRatio(Math.min(Math.min(window.devicePixelRatio || 1, 2) * preset.pixelRatio, maxRatio) * resScale);
     renderer.setSize(w, h, false);
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
@@ -122,7 +129,8 @@ async function boot(): Promise<void> {
 
   progress(0.92, 'Students arriving for class');
   await frame();
-  const people: Person[] = populate(scene, ground, physics, preset.vegetationDensity);
+  // Each passer-by is a dozen draw calls; phones get a smaller crowd.
+  const people: Person[] = populate(scene, ground, physics, preset.vegetationDensity * (touchDevice ? 0.6 : 1));
   const audio = new AudioEngine();
   audio.setVolume(settings.masterVolume);
   player.onStep = (e) => audio.footstep(e.surface, e.intensity, player.renderPos);
@@ -250,8 +258,32 @@ async function boot(): Promise<void> {
   let acc = 0;
   let time = 0;
   let titleT = 0;
+  // Adaptive resolution: every 1.5 s, drop the render scale if frames averaged slower than ~38 fps; raise it again
+  // after three windows near 60 fps. Long gaps (tab hidden, a dialog) are not counted.
+  let winT = 0;
+  let winN = 0;
+  let good = 0;
+  const adapt = (ms: number) => {
+    if (ms > 250) return;
+    winT += ms;
+    winN += 1;
+    if (winT < 1500) return;
+    const avg = winT / winN;
+    winT = 0;
+    winN = 0;
+    if (avg > 26 && resScale > 0.55) {
+      resScale = Math.max(0.55, resScale * 0.85);
+      good = 0;
+      resize();
+    } else if (avg < 18.5 && resScale < 1 && ++good >= 3) {
+      resScale = Math.min(1, resScale * 1.1);
+      good = 0;
+      resize();
+    } else if (avg >= 18.5) good = 0;
+  };
   const loop = (now: number) => {
     requestAnimationFrame(loop);
+    adapt(now - last);
     const dt = THREE.MathUtils.clamp((now - last) / 1000, 0, 0.1);
     last = now;
     const playing = state === 'play' && !ui.modal;
