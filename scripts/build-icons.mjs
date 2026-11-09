@@ -19,6 +19,25 @@ const executablePath = [
 
 // Each game: a full-bleed background and a foreground drawn on a 512 grid.
 const GAMES = {
+  // The installable app: both games in one icon, split on the diagonal.
+  app: {
+    bg: `<defs><linearGradient id="night" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1a1f"/><stop offset="1" stop-color="#22392c"/></linearGradient>
+      <linearGradient id="day" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d3f78"/><stop offset="1" stop-color="#3a6aae"/></linearGradient></defs>
+      <rect width="512" height="512" fill="url(#night)"/>
+      <path d="M512 0 V512 H0Z" fill="url(#day)"/>
+      <path d="M0 512 L512 0" stroke="#f2d27a" stroke-opacity="0.55" stroke-width="5"/>`,
+    fg: `<circle cx="196" cy="78" r="26" fill="#f3e6b8"/>
+      <g transform="translate(-5 -10) scale(0.8)">
+        <path d="M150 112 L206 200 L184 200 L226 268 L202 268 L254 352 L46 352 L98 268 L74 268 L116 200 L94 200Z" fill="#07100b"/>
+        <ellipse cx="139" cy="262" rx="8" ry="5" fill="#eef36f"/><ellipse cx="163" cy="262" rx="8" ry="5" fill="#eef36f"/>
+      </g>
+      <g transform="translate(250 250) scale(0.62)">
+        <path d="M256 118 L408 182 L256 246 L104 182Z" fill="#f2d27a"/>
+        <path d="M172 214 V282 C172 318 340 318 340 282 V214 L256 250Z" fill="#c9a24c"/>
+        <path d="M256 182 L370 204 V286" fill="none" stroke="#f2d27a" stroke-width="10" stroke-linecap="round"/>
+        <circle cx="370" cy="296" r="16" fill="#f2d27a"/>
+      </g>`,
+  },
   forest: {
     bg: `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c1d22"/><stop offset="0.7" stop-color="#2a4636"/><stop offset="1" stop-color="#3b5a3b"/></linearGradient>
       <radialGradient id="moonglow"><stop offset="0" stop-color="#f3e6b8" stop-opacity="0.35"/><stop offset="1" stop-color="#f3e6b8" stop-opacity="0"/></radialGradient></defs>

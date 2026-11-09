@@ -8,14 +8,30 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 let deferred: BeforeInstallPromptEvent | null = null;
+let justInstalled = false;
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((f) => f());
+
+/** Called whenever install availability changes (prompt ready, used, or app installed). */
+export function onInstallChange(f: () => void): void {
+  listeners.add(f);
+}
+
+/** True when the browser's own install prompt is ready to show. */
+export function canPrompt(): boolean {
+  return deferred !== null;
+}
+
+/** True once the app was installed during this visit. */
+export function wasJustInstalled(): boolean {
+  return justInstalled;
+}
 
 export function isStandalone(): boolean {
   return matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
 }
 
-const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+export const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 export function initPwa(): void {
   const test = new URLSearchParams(location.search).has('test');
@@ -31,6 +47,7 @@ export function initPwa(): void {
   });
   window.addEventListener('appinstalled', () => {
     deferred = null;
+    justInstalled = true;
     notify();
   });
   if (!test) keepAwake();
@@ -65,16 +82,26 @@ export function installButton(className: string, label = 'Install app'): HTMLBut
   listeners.add(update);
   b.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (deferred) {
-      const d = deferred;
-      deferred = null;
-      void d.prompt();
-      void d.userChoice.finally(notify);
-    } else if (isIos) {
-      iosSheet();
-    }
+    void install();
   });
   return b;
+}
+
+/** Shows the browser's install prompt, or the Add to Home Screen steps on iOS. */
+export async function install(): Promise<'accepted' | 'dismissed' | 'manual' | 'unavailable'> {
+  if (deferred) {
+    const d = deferred;
+    deferred = null;
+    await d.prompt();
+    const { outcome } = await d.userChoice;
+    notify();
+    return outcome;
+  }
+  if (isIos) {
+    iosSheet();
+    return 'manual';
+  }
+  return 'unavailable';
 }
 
 function iosSheet(): void {

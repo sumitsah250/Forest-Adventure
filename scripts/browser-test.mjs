@@ -102,7 +102,7 @@ try {
   });
   page.on('pageerror', (err) => { errors.push(String(err)); console.log(`[pageerror] ${err}`); });
   const t0 = Date.now();
-  await page.goto(`http://localhost:${port}/?test&quality=${quality}&mode=${mode}${mode === 'ui' ? '&title' : ''}`, { waitUntil: 'load' });
+  await page.goto(`http://localhost:${port}/forest.html?test&quality=${quality}&mode=${mode}${mode === 'ui' ? '&title' : ''}`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 180000 });
   const err = await page.evaluate(() => window.__error);
   if (err) throw new Error(`Game failed to start: ${err}`);
@@ -388,13 +388,13 @@ try {
     console.log(JSON.stringify(r));
   } else if (mode === 'savegame') {
     // Play to the end of Mission 3, save, reload with Continue, compare state.
-    await page.goto(`http://localhost:${port}/?test&savetest&quality=${quality}`, { waitUntil: 'load' });
+    await page.goto(`http://localhost:${port}/forest.html?test&savetest&quality=${quality}`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 180000 });
     const run = await page.evaluate(() => window.__test.missions(3));
     console.log(`played: ok=${run.ok} reached=${run.reached} ${run.problems.join('; ')}`);
     const before = await page.evaluate(() => window.__test.saveState());
     const bytes = await page.evaluate(() => window.__test.saveNow());
-    await page.goto(`http://localhost:${port}/?test&savetest&continue&quality=${quality}`, { waitUntil: 'load' });
+    await page.goto(`http://localhost:${port}/forest.html?test&savetest&continue&quality=${quality}`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 180000 });
     await page.waitForTimeout(1500);
     const after = await page.evaluate(() => window.__test.saveState());

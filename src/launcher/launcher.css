@@ -1,0 +1,127 @@
+/* Sumix Games launcher: the install page and the installed app's home screen. */
+
+:root {
+  --lx-ink: #f1f2ea;
+  --lx-dim: rgba(241, 242, 234, 0.68);
+  --lx-faint: rgba(241, 242, 234, 0.14);
+  --lx-gold: #ecc969;
+  --lx-gold-ink: #1b1608;
+  --lx-card: rgba(12, 18, 24, 0.62);
+  --lx-display: "Bahnschrift", "DIN Condensed", "DIN Alternate", "Roboto Condensed", "Arial Narrow", sans-serif-condensed, system-ui, sans-serif;
+  --lx-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --lx-body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, Arial, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: #070b10; color: var(--lx-ink); font-family: var(--lx-body); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+
+.lx {
+  position: relative; min-height: 100vh; min-height: 100dvh; overflow: hidden;
+  display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 28px;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  isolation: isolate;
+}
+.lx__sky {
+  position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(60vmax 40vmax at 82% 108%, rgba(58, 106, 174, 0.55), transparent 70%),
+    radial-gradient(40vmax 30vmax at 10% -10%, rgba(240, 226, 180, 0.10), transparent 70%),
+    linear-gradient(160deg, #070b10 0%, #0b1a1f 45%, #12274a 100%);
+}
+.lx__sky::after {
+  content: ''; position: absolute; inset: 0; opacity: 0.08; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.lx__brand { display: flex; align-items: center; gap: 10px; font-size: 11.5px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--lx-dim); }
+.lx__brand img { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+
+.lx__hero { max-width: 560px; animation: lx-in 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lx__title {
+  margin: 0; font-family: var(--lx-display); font-weight: 700; font-stretch: condensed;
+  font-size: clamp(42px, 8.5vw, 84px); line-height: 0.95; letter-spacing: 0.01em; text-transform: uppercase;
+}
+.lx__title em { font-style: normal; color: var(--lx-gold); text-shadow: 0 0 32px rgba(236, 201, 105, 0.35); }
+.lx__lede { margin: 16px 0 0; max-width: 34em; font-family: var(--lx-serif); font-style: italic; font-size: clamp(15px, 1.7vw, 18px); line-height: 1.5; color: var(--lx-dim); }
+.lx__action { margin-top: 24px; display: grid; gap: 12px; justify-items: start; }
+
+.lx-btn {
+  appearance: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 10px;
+  min-height: 54px; padding: 0 26px; border-radius: 14px;
+  background: var(--lx-gold); color: var(--lx-gold-ink); font: 700 17px var(--lx-body); letter-spacing: 0.01em;
+  box-shadow: 0 10px 30px rgba(236, 201, 105, 0.25), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s;
+}
+.lx-btn svg { width: 19px; height: 19px; }
+.lx-btn:active { transform: scale(0.97); }
+.lx-btn:disabled { cursor: default; opacity: 0.55; box-shadow: none; }
+@media (hover: hover) { .lx-btn:not(:disabled):hover { box-shadow: 0 14px 38px rgba(236, 201, 105, 0.38), inset 0 -2px 0 rgba(0, 0, 0, 0.15); } }
+.lx-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: lx-spin 0.8s linear infinite; }
+
+.lx-note { font-size: 13px; color: var(--lx-dim); min-height: 1em; }
+.lx-note--box { max-width: 30em; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--lx-faint); background: rgba(0, 0, 0, 0.25); line-height: 1.5; }
+.lx-note b { color: var(--lx-ink); }
+.lx-link { appearance: none; border: 0; background: none; padding: 0; color: var(--lx-gold); font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.lx-done { max-width: 32em; padding: 14px 16px; border-radius: 12px; background: rgba(120, 190, 120, 0.12); border: 1px solid rgba(140, 210, 140, 0.3); line-height: 1.5; color: var(--lx-dim); }
+.lx-done b { color: var(--lx-ink); }
+.lx-done > b:first-child { color: #9fe09f; margin-right: 6px; }
+
+.lx-dl { width: min(460px, 100%); padding: 16px 18px; border-radius: 14px; background: var(--lx-card); border: 1px solid var(--lx-faint); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.lx-dl__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.lx-dl__state { font-size: 14px; }
+.lx-dl__pct { font-family: var(--lx-display); font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; color: var(--lx-gold); }
+.lx-dl__bar { height: 6px; margin: 10px 0 8px; border-radius: 99px; background: var(--lx-faint); overflow: hidden; }
+.lx-dl__bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c99a3b, var(--lx-gold)); transform-origin: left; transform: scaleX(0); transition: transform 0.35s ease; }
+.lx-dl__meta { font-size: 12.5px; color: var(--lx-dim); font-variant-numeric: tabular-nums; }
+
+.lx__games { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+.lx-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; align-items: start;
+  padding: 16px; border-radius: 18px; background: var(--lx-card); border: 1px solid var(--lx-faint);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  animation: lx-in 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.lx-card:nth-child(2) { animation-delay: 0.08s; }
+.lx-card__icon { width: 72px; height: 72px; border-radius: 18px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); }
+.lx-card__tag { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--lx-gold); }
+.lx-card__name { margin: 3px 0 0; font-family: var(--lx-display); font-weight: 700; font-stretch: condensed; font-size: 26px; letter-spacing: 0.03em; text-transform: uppercase; }
+.lx-card__blurb { margin: 6px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--lx-dim); }
+.lx-card__play {
+  grid-column: 1 / -1; margin-top: 12px; display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 12px;
+  background: var(--lx-gold); color: var(--lx-gold-ink); font-weight: 700; font-size: 16px; text-decoration: none;
+  transition: transform 0.15s ease, opacity 0.2s;
+}
+.lx-card__play:active { transform: scale(0.98); }
+.lx-card__play[aria-disabled="true"] { background: var(--lx-faint); color: var(--lx-dim); pointer-events: none; }
+/* In the browser the cards only show what's inside; playing happens in the installed app. */
+.lx--web .lx-card__play[aria-disabled="true"] { display: none; }
+
+.lx__foot { font-size: 11.5px; color: rgba(241, 242, 234, 0.4); letter-spacing: 0.04em; }
+
+/* Wide screens and landscape phones: hero on the left, games on the right. */
+@media (min-width: 880px), (orientation: landscape) and (min-width: 600px) {
+  .lx { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); column-gap: clamp(24px, 5vw, 72px); align-content: center; }
+  .lx__brand, .lx__foot { grid-column: 1 / -1; }
+  .lx__games { align-self: center; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .lx { gap: 14px; align-content: start; }
+  .lx__title { font-size: clamp(34px, 7vh, 56px); }
+  .lx__lede { margin-top: 8px; font-size: 14px; }
+  .lx__action { margin-top: 14px; }
+  .lx-card { padding: 12px; }
+  .lx-card__icon { width: 52px; height: 52px; border-radius: 13px; }
+  .lx-card__name { font-size: 21px; }
+  .lx-card__blurb { display: none; }
+  .lx-card__play { margin-top: 8px; min-height: 40px; }
+}
+@media (min-width: 1200px) {
+  .lx { padding-left: 6vw; padding-right: 6vw; }
+}
+
+@keyframes lx-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lx-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .lx *, .lx *::before, .lx *::after { animation: none !important; transition-duration: 0.01s !important; }
+}

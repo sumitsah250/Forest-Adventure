@@ -12,8 +12,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 6000,
     assetsInlineLimit: 0,
     rollupOptions: {
-      // Two games: the forest (index.html) and Campus Quest (campus.html).
-      input: { main: 'index.html', campus: 'campus.html' },
+      // index.html is the install page / app launcher; the two games have their own pages.
+      input: { main: 'index.html', forest: 'forest.html', campus: 'campus.html' },
     },
   },
 });

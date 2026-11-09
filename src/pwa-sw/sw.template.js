@@ -38,9 +38,9 @@ self.addEventListener('activate', (event) => {
 async function fromShell(request) {
   if (request.mode === 'navigate') {
     const path = rel(new URL(request.url)) || 'index.html';
-    return (await caches.match(path, { cacheName: SHELL_CACHE, ignoreSearch: true })) || null;
+    return (await caches.match(path, { cacheName: SHELL_CACHE, ignoreSearch: true, ignoreVary: true })) || null;
   }
-  return (await caches.match(request, { cacheName: SHELL_CACHE })) || null;
+  return (await caches.match(request, { cacheName: SHELL_CACHE, ignoreVary: true })) || null;
 }
 
 async function page(event) {
@@ -61,14 +61,14 @@ async function page(event) {
     const cached = await fromShell(event.request);
     return cached || (await network);
   } catch {
-    return (await fromShell(event.request)) || (await caches.match('index.html', { cacheName: SHELL_CACHE })) || Response.error();
+    return (await fromShell(event.request)) || (await caches.match('index.html', { cacheName: SHELL_CACHE, ignoreVary: true })) || Response.error();
   }
 }
 
 async function asset(request, path, hash) {
   const cache = await caches.open(ASSET_CACHE);
   const key = new URL(`${path}?v=${hash}`, scope).href;
-  const hit = await cache.match(key);
+  const hit = await cache.match(key, { ignoreVary: true });
   if (hit) return hit;
   // Revalidate with the server: a changed file keeps its name, so the browser's HTTP
   // cache could otherwise hand back last release's copy.
@@ -79,7 +79,8 @@ async function asset(request, path, hash) {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || request.headers.has('range')) return;
+  // Range requests and the launcher's own bulk download go straight to the network.
+  if (request.method !== 'GET' || request.headers.has('range') || request.headers.has('x-sumix-download')) return;
   const url = new URL(request.url);
   const path = rel(url);
   if (path === null) return;

@@ -423,7 +423,7 @@ export class CampusUI {
     controls.onclick = () => box.querySelector('.cq-controls')?.classList.toggle('show');
     menu.append(controls);
     const back = el('a', 'cq-btn', 'Play Poacher Panic (forest)');
-    back.href = './index.html';
+    back.href = './forest.html';
     menu.append(back, installButton('cq-btn'));
     box.append(menu, el('div', 'cq-controls', CONTROLS));
     box.append(el('div', 'cq-title__credit', 'Campus map © OpenStreetMap contributors (ODbL) · Footprints © Microsoft (ODbL) · Elevation: SRTM · Characters are fictional'));
