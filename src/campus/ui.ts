@@ -804,6 +804,10 @@ export class CampusUI implements ModalHost {
     daily: string | null;
     goals: { text: string; progress: number; target: number; done: boolean }[];
     badges: string;
+    /** Story 2: who is playing, and a way to change it. */
+    player?: { line: string; onEdit: () => void } | null;
+    /** Extra menu entries (label, small text, action), shown after the main ones. */
+    extra?: { label: string; small: string; run: () => void }[];
   }): void {
     const ov = this.open('cq-overlay--title');
     const box = el('div', 'cq-title');
@@ -836,6 +840,17 @@ export class CampusUI implements ModalHost {
     const pr = el('button', 'cq-btn', `Goals &amp; badges <small>${esc(o.badges)}</small>`);
     pr.onclick = o.onProgress;
     menu.append(pr);
+    for (const x of o.extra ?? []) {
+      const b = el('button', 'cq-btn', `${esc(x.label)} <small>${esc(x.small)}</small>`);
+      b.onclick = x.run;
+      menu.append(b);
+    }
+    if (o.player) {
+      const p = el('button', 'cq-btn cq-btn--player');
+      p.textContent = o.player.line;
+      p.onclick = o.player.onEdit;
+      menu.prepend(p);
+    }
     const controls = el('button', 'cq-btn', 'Controls');
     controls.onclick = () => box.querySelector('.cq-controls')?.classList.toggle('show');
     menu.append(controls);

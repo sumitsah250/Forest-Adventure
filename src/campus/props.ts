@@ -13,6 +13,8 @@ export interface GateSpot {
   heading: number;
   /** Half the distance between the pillars. */
   span: number;
+  /** Swings the two gate leaves: 1 wide open (into campus), 0 shut. A barrier blocks the road while shut. */
+  setOpen(open: number): void;
 }
 
 /** A cloth banner strung between the gate pillars, readable from both sides. */

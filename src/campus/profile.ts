@@ -3,7 +3,7 @@
 // the time-trial record and the daily chiya streak. Kept in localStorage.
 
 import type { KartUpgrades } from './kart.ts';
-import { STORY_VERSION } from './story.ts';
+import { DEMO_MODE, STORY_VERSION } from './story.ts';
 
 const KEY = 'campus-blackout-profile-v1';
 
@@ -84,13 +84,20 @@ function fresh(): Profile {
 }
 
 /** A new profile, already on the story being played. */
-function started(): Profile {
+export function started(): Profile {
   const p = fresh();
   p.storyVersion = STORY_VERSION;
   return p;
 }
 
+/** Fest demo: every player starts from a new profile, kept in memory only. */
+export function resetForDemo(p: Profile): void {
+  Object.assign(p, started());
+}
+
 export function loadProfile(): Profile {
+  // The fest demo never reads or writes the player's save.
+  if (DEMO_MODE) return started();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return started();
@@ -122,6 +129,7 @@ export function activateStory(p: Profile, version: 1 | 2): void {
 }
 
 export function saveProfile(p: Profile): void {
+  if (DEMO_MODE) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(p));
   } catch {

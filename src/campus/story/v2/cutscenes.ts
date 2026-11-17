@@ -108,6 +108,47 @@ export const CUTSCENES: Partial<Record<CutsceneId, CutsceneDef>> = {
     ],
   },
 
+  // M1_GATE, end of mission 1, 6 s: the main gate swings shut, the camera shakes, and MITRA names
+  // the player on every speaker on campus.
+  M1_GATE: {
+    shots: [
+      {
+        // Inside the gate, looking out along the road as the leaves swing shut.
+        dur: 3.2,
+        path: [
+          { entity: 'gate', off: [5, 3.6, 16], local: true },
+          { entity: 'gate', off: [3, 2.8, 11], local: true },
+          { entity: 'gate', off: [1.5, 2.2, 8], local: true },
+        ],
+        look: { entity: 'gate', off: [0, 2, -2], local: true },
+        ease: 'out',
+        fov: [52, 46],
+        sounds: [{ at: 0.3, name: 'gateCreak' }, { at: 1.55, name: 'gateSlam' }],
+        events: [
+          { at: 0, do: 'gate', value: 1, over: 0 },
+          { at: 0.35, do: 'gate', value: 0, over: 1.2 },
+          { at: 1.55, do: 'shake', value: 0.6, over: 0.7 },
+        ],
+      },
+      {
+        // Up over the campus: every speaker carries MITRA's voice.
+        dur: 4.2,
+        path: [
+          { entity: 'gate', off: [1.5, 2.2, 8], local: true },
+          { entity: 'gate', off: [0, 14, 30], local: true },
+          { entity: 'gate', off: [-8, 30, 60], local: true },
+        ],
+        look: [{ entity: 'gate', off: [0, 2, 0] }, { entity: 'gate', off: [0, 0, 180], local: true }],
+        ease: 'inOut',
+        sounds: [{ at: 0.1, name: 'speakers' }],
+        subtitles: [
+          { at: 0.2, who: 'mitra', text: T.cut.gateMitra, dur: 2.3 },
+          { at: 2.5, who: 'mitra', text: T.cut.gateMitra2, dur: 1.7 },
+        ],
+      },
+    ],
+  },
+
   // C2, middle of mission 1, 6 s: Asha pulls the tarp off Kalki. Headlight on. Low orbit.
   C2: {
     shots: [

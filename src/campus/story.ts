@@ -10,7 +10,7 @@
 import * as v1 from './story/v1.ts';
 import * as v2 from './story/v2/index.ts';
 import { CUTSCENES as V2_CUTSCENES } from './story/v2/cutscenes.ts';
-import type { CutsceneDef } from './story/types.ts';
+import type { ClueDef, CutsceneDef } from './story/types.ts';
 
 export type { Anchor, ClueDef, ClueId, CutEvent, CutsceneDef, CutsceneId, Ease, ItemDef, ItemModel, MissionDef, NpcDef, PuzzleDef, ShotDef, Sky, Step, TodoId, Where } from './story/types.ts';
 export { KART_HOME, TRIAL_MEDALS, TRIAL_ROUTE } from './story/routes.ts';
@@ -18,12 +18,24 @@ export { KART_HOME, TRIAL_MEDALS, TRIAL_ROUTE } from './story/routes.ts';
 /** Flip to 2 when V2 is ready to be the game people get. */
 export const DEFAULT_STORY_VERSION: 1 | 2 = 1;
 
+const query = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
+
+/** ?demo=1: the fest stall build. Name entry, C1 and mission 1 only, then a leaderboard. Never saves. */
+export const DEMO_MODE = query.get('demo') === '1';
+/** ?debug=1: the developer panel (debug.ts). */
+export const DEBUG_MODE = query.get('debug') === '1';
+
 function pickVersion(): 1 | 2 {
-  const q = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('story');
+  if (DEMO_MODE) return 2;
+  const q = query.get('story');
   return q === '1' ? 1 : q === '2' ? 2 : DEFAULT_STORY_VERSION;
 }
 
 export const STORY_VERSION: 1 | 2 = pickVersion();
+/** Story 2's text (for screens and lines that only exist in story 2). */
+export const V2_TEXT = v2.T;
+/** The clues (story 2; story 1 has none). */
+export const CLUES: ClueDef[] = STORY_VERSION === 2 ? v2.CLUES : [];
 
 const story = STORY_VERSION === 2 ? v2 : v1;
 

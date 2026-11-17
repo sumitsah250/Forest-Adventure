@@ -31,7 +31,7 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'cutscene', id: 'C2' },
       { kind: 'kart', obj: T.m1.kartObj },
       { kind: 'drive', obj: T.m1.driveObj, route: ESCAPE, time: 70, pursuer: true },
-      { kind: 'stub', todo: 'TODO_P4_GATE_SLAM', note: 'The main gate slams shut.' },
+      { kind: 'cutscene', id: 'M1_GATE' },
       { kind: 'radio', from: 'mitra', lines: T.m1.mitraEnd },
       { kind: 'radio', from: 'asha', lines: T.m1.ashaEnd },
     ],

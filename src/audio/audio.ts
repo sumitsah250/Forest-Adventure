@@ -744,6 +744,31 @@ export class AudioEngine implements SfxApi {
         for (const [f, d] of [[523.3, 0.5], [659.3, 0.62], [784, 0.74], [1046.5, 0.9]] as const) this.tone(out, t + d, f, f, 1.6, 0.06, 'triangle');
         break;
       }
+      case 'gateCreak':
+        // Old hinges taking the weight of a big iron leaf.
+        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 900, q: 6, dur: 1.1, vol: 0.25, attack: 0.2 });
+        this.tone(out, t + 0.05, 140, 210, 1.0, 0.08, 'sawtooth');
+        break;
+      case 'gateSlam':
+        // Iron on iron, then the echo rolling off the buildings.
+        out.connect(this.reverbSend);
+        this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 520, dur: 0.6, vol: 1, attack: 0.004 });
+        this.burst(out, t, { type: 'bandpass', freq: 1900, q: 3, dur: 0.18, vol: 0.6 });
+        this.tone(out, t, 210, 180, 0.9, 0.22, 'square');
+        this.tone(out, t, 317, 300, 1.2, 0.12, 'triangle');
+        for (let i = 1; i <= 3; i += 1) this.burst(out, t + i * 0.32, { buf: this.brown, type: 'lowpass', freq: 380, dur: 0.5, vol: 0.45 / i });
+        break;
+      case 'speakers':
+        // The campus PA waking up: a hum and a squeal of feedback.
+        out.connect(this.reverbSend);
+        this.tone(out, t, 100, 100, 0.8, 0.08, 'square');
+        this.tone(out, t + 0.1, 2600, 3100, 0.35, 0.04, 'sine');
+        break;
+      case 'alarm':
+        // Spotted: a two-tone stinger.
+        this.tone(out, t, 880, 880, 0.14, 0.14, 'square');
+        this.tone(out, t + 0.16, 660, 660, 0.2, 0.14, 'square');
+        break;
       case 'chirp':
         // MITRA about to speak: two quick rising notes, like a terminal waking.
         this.tone(out, t, 1320, 1760, 0.07, 0.07, 'square');

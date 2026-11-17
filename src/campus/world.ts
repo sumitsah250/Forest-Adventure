@@ -1654,7 +1654,54 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
   }
   // Which way along the road is into campus (towards the middle of the map).
   const into = Math.cos(ang) * -gx + Math.sin(ang) * -gz >= 0 ? 1 : -1;
-  return { x: gx, y, z: gz, heading: Math.atan2(Math.cos(ang) * into, Math.sin(ang) * into), span };
+  const rx = Math.cos(ang) * into;
+  const rz = Math.sin(ang) * into;
+
+  // Two iron leaves, hinged on the inner faces of the pillars. Each is one merged mesh in a
+  // pivot group, so swinging it is a single rotation.
+  const hinge = span - 0.55;
+  const leafW = hinge - 0.04;
+  const leafH = 2.7;
+  const parts: THREE.BufferGeometry[] = [];
+  const rod = (w: number, h: number, d: number, x: number, yy: number) => parts.push(new THREE.BoxGeometry(w, h, d).translate(x, yy, 0));
+  rod(leafW, 0.1, 0.09, leafW / 2, leafH - 0.05);
+  rod(leafW, 0.1, 0.09, leafW / 2, 0.18);
+  rod(leafW, 0.07, 0.07, leafW / 2, leafH * 0.55);
+  rod(0.12, leafH, 0.1, 0.06, leafH / 2);
+  rod(0.12, leafH, 0.1, leafW - 0.06, leafH / 2);
+  for (let x = 0.3; x < leafW - 0.15; x += 0.21) rod(0.035, leafH - 0.25, 0.035, x, leafH / 2 + 0.03);
+  const leafGeo = mergeGeometries(parts)!;
+  for (const p of parts) p.dispose();
+  const iron = new THREE.MeshStandardMaterial({ color: '#25282b', metalness: 0.75, roughness: 0.42 });
+  // Rotation that points a leaf's local +x along a world direction (x, z).
+  const yaw = (x: number, z: number) => Math.atan2(-z, x);
+  const leaves: { pivot: THREE.Group; shut: number; delta: number }[] = [];
+  for (const s of [-1, 1]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(gx + px * hinge * s, y, gz + pz * hinge * s);
+    const leaf = new THREE.Mesh(leafGeo, iron);
+    leaf.castShadow = true;
+    pivot.add(leaf);
+    group.add(pivot);
+    // Shut: the leaf reaches from its hinge to the middle. Open: it swings into campus.
+    const shut = yaw(-px * s, -pz * s);
+    let delta = yaw(rx, rz) - shut;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    leaves.push({ pivot, shut, delta });
+  }
+  let barrier: ReturnType<PhysicsWorld['addBox']> | null = null;
+  const setOpen = (open: number) => {
+    const o = Math.max(0, Math.min(1, open));
+    for (const l of leaves) l.pivot.rotation.y = l.shut + l.delta * o;
+    const closed = o < 0.2;
+    if (closed && !barrier) barrier = physics.addBox({ x: gx, y: y + 1.35, z: gz, hx: hinge, hy: 1.35, hz: 0.2, rotY: -ang });
+    else if (!closed && barrier) {
+      physics.removeCollider(barrier);
+      barrier = null;
+    }
+  };
+  setOpen(1);
+  return { x: gx, y, z: gz, heading: Math.atan2(rx, rz), span, setOpen };
 }
 
 // ==================================================================== trees

@@ -32,14 +32,14 @@ export type Where =
 export type ItemModel = 'book' | 'cube' | 'breaker' | 'usb' | 'toolbox' | 'gnss' | 'torch' | 'sandbag' | 'evidence' | 'module' | 'part' | 'panel' | 'relay';
 
 export type ClueId = 'c1' | 'c2' | 'c3' | 'c4' | 'c5' | 'c6' | 'c7' | 'c8' | 'c9' | 'c10' | 'c11' | 'c12' | 'c13';
-export type CutsceneId = 'C1' | 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'C7' | 'C8' | 'C9' | 'C10';
+/** The spec's C1-C10, plus short scripted moments (M1_GATE: the gate slam at the end of mission 1). */
+export type CutsceneId = 'C1' | 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'C7' | 'C8' | 'C9' | 'C10' | 'M1_GATE';
 
 /**
  * Pieces of V2 that are not built yet. Each name is searchable in the code and says which
  * phase builds it. A `stub` step with one of these is skipped by the runner with a log line.
  */
 export type TodoId =
-  | 'TODO_P4_GATE_SLAM' // M1 end: the main gate closes
   | 'TODO_P5_CLUE_TRACKING' // clue cards (gold / silver); `clue` fields on steps are ignored until then
   | 'TODO_P5_PUZZLE_TIMER' // M3: the 90 s countdown that keeps running during the breaker puzzle
   | 'TODO_P5_PLAYER_FACE_SCREENS' // M3 end: every screen shows the player's face

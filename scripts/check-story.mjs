@@ -228,6 +228,12 @@ if (cutscenes) {
   }
 }
 
+// ------------------------------------------------------------------ MITRA's spotted lines
+for (const [act, lines] of Object.entries(T.mitraSpotted)) {
+  if (lines.length < 8) err(`mitraSpotted.${act}: ${lines.length} lines (at least 8 per act)`);
+  lines.forEach((l, i) => checkCard(l, `mitraSpotted.${act}[${i}]`));
+}
+
 // ------------------------------------------------------------------ every other string in text.ts is at least non-empty
 (function walk(o, path) {
   for (const [k, v] of Object.entries(o)) {

@@ -218,7 +218,7 @@ export class Subtitles {
   constructor(root: HTMLElement, deps: DialogueDeps, nameOf: (id: string) => string) {
     this.deps = deps;
     this.nameOf = nameOf;
-    this.box = el('div', 'cq-sub');
+    this.box = el('div', 'cq-subtitle');
     this.who = el('b');
     this.text = el('span');
     this.box.append(this.who, this.text);
@@ -234,7 +234,7 @@ export class Subtitles {
     const mitra = who === 'mitra';
     this.who.textContent = this.nameOf(who);
     this.text.textContent = this.deps.fill(text);
-    this.box.className = `cq-sub on${mitra ? ' mitra' : ''}${mitra && this.deps.mitraWarm() ? ' warm' : ''}`;
+    this.box.className = `cq-subtitle on${mitra ? ' mitra' : ''}${mitra && this.deps.mitraWarm() ? ' warm' : ''}`;
     if (mitra) this.deps.sound('chirp');
   }
 }

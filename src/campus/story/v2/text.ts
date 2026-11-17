@@ -18,14 +18,62 @@ export const T = {
     festBannerSub: 'IOE PASHCHIMANCHAL CAMPUS',
   },
 
-  /** MITRA's one-liners when a drone spots the player (wired up in Phase 4). */
+  /**
+   * MITRA's one-liners when a drone spots the player: one act per list (missions 1-3, 4-7, 8-10).
+   * Never the same line twice in a row, at most one every 6 seconds.
+   */
   mitraSpotted: {
-    cold: [
+    act1: [
       'Movement detected. Please hold still for processing.',
-      'There you are. The attendance register thanks you.',
-      'Running in the corridor is a fine of fifty rupees.',
+      'There you are, {name}. The attendance register thanks you.',
+      'Running on campus after hours is a fine of fifty rupees.',
+      'Intruder located. Please queue at the Exam Section.',
+      'Roll {roll}, your file is getting longer.',
+      'Searchlight engaged. Smile for the report.',
+      'Unauthorised student detected. This will go on your marksheet.',
+      'You are not on the fest volunteer schedule for this.',
     ],
-    honest: ['I see you. I am no longer sure I should.'],
+    act2: [
+      'I see you. My records still say you did it.',
+      'Detected again, {name}. The rain does not hide you.',
+      'Hold still. I am trying to be sure about you.',
+      'Movement in the dark. Probably you. Probably.',
+      'Spotted. My order says stop you. My logs say otherwise.',
+      'Drone contact. I would like this to be a misunderstanding.',
+      'You again. Either you are guilty or very persistent.',
+      'Searchlight on you. Please do not make it worse.',
+    ],
+    act3: [
+      'That drone is not mine any more. Move!',
+      'Firewall unit sees you. Get out of its light.',
+      'Careful, {name}. Those eyes belong to the firewall.',
+      'Spotted by his drones. I am working on it.',
+      'Out of the light, now. I cannot override that unit.',
+      'They see you, and I see them. Keep moving.',
+      'Firewall drone locked on. Break line of sight.',
+      'Not one of mine. Left, then wait.',
+    ],
+  },
+
+  /** Screens outside the missions: name entry, the fest demo leaderboard, the location card. */
+  screens: {
+    nameTitle: 'Who are you?',
+    nameSub: 'MITRA will use these. Please be accurate. It already thinks you are a criminal.',
+    nameLabel: 'Your name',
+    namePlaceholder: 'e.g. Sita Thapa',
+    rollLabel: 'Roll number',
+    rollPlaceholder: 'e.g. PAS078BCT001',
+    nameStart: 'Start',
+    nameSave: 'Save',
+    nameNeeded: 'Type a name first.',
+    nameMenu: 'Player: {name} · {roll}',
+    demoBoard: 'Fastest escapes',
+    demoBoardSub: 'Mission 1 · Lights Out',
+    demoYourTime: 'Your escape: {time}',
+    demoNext: 'Next player',
+    demoEmpty: 'No escapes yet. Be the first!',
+    demoReset: 'Leaderboard cleared.',
+    demoHint: 'Staff: hold the title for 3 seconds to clear the board.',
   },
 
   m1: {
@@ -390,5 +438,7 @@ export const T = {
     c1Sub: 'Blackout at WRC',
     c2Asha: 'Meet Kalki. The Automobile Club built her.',
     c2Asha2: 'She is faster than she looks.',
+    gateMitra: 'Attention, all campus. {name}, roll {roll}, is the intruder.',
+    gateMitra2: 'Every gate is now sealed. Thank you for your cooperation.',
   },
 };

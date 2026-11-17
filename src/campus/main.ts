@@ -26,7 +26,9 @@ import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
 import { Extras } from './extras.ts';
-import { CUTSCENES, FEST_BANNER, KART_HOME, MISSIONS, NPCS, STORY_VERSION, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky } from './story.ts';
+import { CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky } from './story.ts';
+import { LocationCard, addToBoard, leaderboard, nameEntry } from './screens.ts';
+import { DebugPanel } from './debug.ts';
 import { Cutscenes } from './cutscene.ts';
 import { Subtitles } from './dialogue.ts';
 import { Portraits } from './portraits.ts';
@@ -38,7 +40,7 @@ import { CampusSound } from './soundscape.ts';
 import { buildHumps } from './ramps.ts';
 import { WheelSpray } from '../vehicles/spray.ts';
 import { Kalki, MAX_UPGRADE, PAINTS, UPGRADE_COST } from './kart.ts';
-import { claimDaily, has, levelOf, loadProfile, resetStory, saveProfile, titleFor } from './profile.ts';
+import { claimDaily, has, levelOf, loadProfile, resetForDemo, resetStory, saveProfile, titleFor } from './profile.ts';
 import { badgeViews, checkBadges, goalViews, refreshGoals, starsTotal, trackGoal, type GoalEvent } from './meta.ts';
 import { createLoadingScreen } from '../ui/loadingScreen.ts';
 import { initPwa } from '../pwa.ts';
@@ -200,6 +202,44 @@ async function boot(): Promise<void> {
   };
   const subs = new Subtitles(uiRoot, ui.dialogue, (id) => VOICES[id]?.name ?? NPCS.find((n) => n.id === id)?.name ?? id);
   // Cutscene props (story 2): the fest banner on the gate, Kalki's tarp, the drones over the RIC.
+  const locCard = new LocationCard(uiRoot);
+  // The main gate (story 2): open, or shut by MITRA. `gateTo` is where the leaves are heading.
+  let gateOpen = 1;
+  let gateTo = 1;
+  let gateRate = Infinity;
+  /** Camera shake for big impacts: seconds left and strength. Applied for the render only. */
+  let shakeT = 0;
+  let shakeLen = 1;
+  let shakeAmp = 0;
+  const shakeOff = new THREE.Vector3();
+  /**
+   * Whether the gate stands open at the start of a mission (story 2): open until MITRA slams it
+   * at the end of mission 1, shut from then on. Mission 10 and the ending open and shut it in
+   * their cutscenes. Story 1 has no reason to shut it.
+   */
+  const gateFor = (index: number) => (STORY_VERSION !== 2 || index <= 0 || index >= MISSIONS.length ? 1 : 0);
+  // MITRA's spotted lines: never the same twice in a row, at most one every 6 seconds.
+  let spottedLast = -1;
+  let spottedAt = -1e9;
+  let stingerAt = -1e9;
+  const spotted = () => {
+    const now = performance.now();
+    if (now - stingerAt > 4000) {
+      stingerAt = now;
+      audio.play('alarm');
+    }
+    if (STORY_VERSION !== 2 || now - spottedAt < 6000 || cutscenes.playing || ui.modal) return;
+    const i = missions.index;
+    const lines = i < 3 ? V2_TEXT.mitraSpotted.act1 : i < 7 ? V2_TEXT.mitraSpotted.act2 : V2_TEXT.mitraSpotted.act3;
+    let k = Math.floor(Math.random() * lines.length);
+    if (k === spottedLast) k = (k + 1) % lines.length;
+    spottedLast = k;
+    spottedAt = now;
+    subs.show('mitra', lines[k]);
+    window.setTimeout(() => {
+      if (!cutscenes.playing && performance.now() - spottedAt >= 3000) subs.show(null, '');
+    }, 3200);
+  };
   const tarp = new Tarp();
   const droneEyes = new DroneEyes();
   scene.add(tarp.obj, droneEyes.group);
@@ -472,6 +512,12 @@ async function boot(): Promise<void> {
       extras.refresh();
     },
     onComplete: (r) => afterMission(r),
+    onBegin: (index) => {
+      gateTo = gateOpen = gateFor(index);
+      world.gate.setOpen(gateOpen);
+    },
+    locationCard: (clock, place) => locCard.show(clock, place),
+    spotted,
     cutscene: (id) => cutscenes.play(id, camera),
     reward,
     chime: (n) => audio.chime(n),
@@ -524,6 +570,14 @@ async function boot(): Promise<void> {
     drones: (e, at) => droneEyes.show(e.value ?? 0, at),
     tarp: (e) => (e.arg === 'on' ? tarp.cover(kart.position, kart.heading) : tarp.pull()),
     headlights: (e) => kart.vehicle.setLights(!!e.value),
+    gate: (e) => {
+      gateTo = e.value ?? 0;
+      gateRate = e.over ? Math.abs(gateTo - gateOpen) / e.over : Infinity;
+    },
+    shake: (e) => {
+      shakeAmp = e.value ?? 0.5;
+      shakeLen = shakeT = e.over ?? 0.6;
+    },
   };
   const cutscenes = new Cutscenes(CUTSCENES, {
     where: (w, out) => {
@@ -566,6 +620,10 @@ async function boot(): Promise<void> {
   const totalStars = () => `${starsTotal(profile)} / ${MISSIONS.length * 3}`;
 
   const afterMission = async (r: MissionResult) => {
+    if (DEMO_MODE) {
+      await demoFinish(r.seconds);
+      return;
+    }
     const lv = levelOf(profile.xp);
     const last = r.index === MISSIONS.length - 1 && !r.replay;
     const nextIndex = profile.story < MISSIONS.length ? profile.story : -1;
@@ -733,6 +791,9 @@ async function boot(): Promise<void> {
       daily: dailyText,
       goals: goalViews(profile),
       badges: `${profile.badges.length} / ${badgeViews(profile).length}`,
+      player: STORY_VERSION === 2
+        ? { line: ui.dialogue.fill(V2_TEXT.screens.nameMenu), onEdit: () => void askName(false).then(toTitle) }
+        : null,
     });
     dailyText = null;
   };
@@ -911,8 +972,84 @@ async function boot(): Promise<void> {
     for (const o of hidden) o.visible = false;
     scene.remove(warm);
   }
+  // ------------------------------------------------------------------ name entry and the fest demo
+  const askName = async (first: boolean) => {
+    const r = await nameEntry(ui, V2_TEXT.screens, { name: profile.name, roll: profile.roll, first, onTap: () => void audio.start() });
+    if (r) {
+      profile.name = r.name;
+      profile.roll = r.roll;
+      saveProfile(profile);
+    }
+  };
+  /** Demo: a new player. Name entry, then C1 and mission 1. */
+  const demoLoop = async () => {
+    state = 'title';
+    missions.stop();
+    if (mode === 'kart') exitKart();
+    ui.showHud(false);
+    touch?.setVisible(false);
+    input.exitPointerLock();
+    resetForDemo(profile);
+    setSky(AFTERNOON, true);
+    await askName(true);
+    await newStory();
+  };
+  /** Demo: mission 1 is done. Its time goes on the board; after 30 s idle the next player gets the name screen. */
+  const demoFinish = async (seconds: number) => {
+    cinema.release();
+    missions.stop();
+    state = 'menu';
+    ui.showHud(false);
+    touch?.setVisible(false);
+    input.exitPointerLock();
+    const at = addToBoard({ name: profile.name, roll: profile.roll, time: seconds });
+    await leaderboard(ui, V2_TEXT.screens, { highlight: at, yourTime: seconds, idleMs: 30000 });
+    void demoLoop();
+  };
+
   void loading.done();
-  toTitle();
+  if (DEMO_MODE) void demoLoop();
+  else if (STORY_VERSION === 2 && !profile.name) void askName(true).then(toTitle);
+  else toTitle();
+
+  // ------------------------------------------------------------------ debug panel (?debug=1 only)
+  let debugWeather: 'clear' | 'drizzle' | 'storm' | null = null;
+  const debug = DEBUG_MODE
+    ? new DebugPanel(uiRoot, {
+        missions: MISSIONS.map((m) => m.title),
+        interludes: [],
+        jump: (i) => {
+          ui.close();
+          if (cutscenes.playing) cutscenes.skip();
+          // Everything before the mission counts as played, so its unlocks and the story state match.
+          if (profile.story < i) profile.story = i;
+          for (let k = 0; k < i; k += 1) {
+            const rw = MISSIONS[k].reward;
+            for (const u of [...(rw.unlock ? [rw.unlock] : []), ...(rw.unlocks ?? [])]) if (!profile.unlocks.includes(u)) profile.unlocks.push(u);
+          }
+          kart.boostUnlocked = has(profile, 'boost');
+          powerShown = powerTo = powerFor();
+          tarp.clear();
+          void startMission(i, 0, false);
+        },
+        interlude: () => undefined,
+        clues: (kind) => {
+          for (const c of CLUES) {
+            if (kind === 'clear') delete profile.clues[c.id];
+            else profile.clues[c.id] = kind;
+          }
+          saveProfile(profile);
+        },
+        minutes: (n) => {
+          profile.minutes = Math.max(0, Math.round(n));
+          saveProfile(profile);
+        },
+        weather: (w) => (debugWeather = w === 'auto' ? null : w),
+        sky: (s) => setSky(s === 'auto' ? SKIES[missions.def?.sky ?? 'dusk'] : SKIES[s], true),
+        skipCutscene: () => cutscenes.skip(),
+        stats: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mission: missions.def ? `${missions.index + 1}/${MISSION_COUNT} step ${missions.step + 1}` : 'free roam' }),
+      })
+    : null;
   (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, enterKart, exitKart, get mode() { return mode; } };
 
   let last = performance.now();
@@ -1048,6 +1185,13 @@ async function boot(): Promise<void> {
     // Cinematic cameras (intros, conversations, victory orbit) take over when running.
     cinema.update(rdt, camera);
     cutscenes.update(rdt, camera);
+    // The main gate's leaves swing toward where a cutscene (or the story) wants them.
+    if (gateOpen !== gateTo) {
+      const step = rdt * gateRate;
+      gateOpen += THREE.MathUtils.clamp(gateTo - gateOpen, -step, step);
+      world.gate.setOpen(gateOpen);
+    }
+    debug?.frame(now);
     document.body.classList.toggle('cq-cinematic', cinema.active || cutscenes.playing);
     tarp.update(rdt);
     droneEyes.update(rdt, now / 1000);
@@ -1079,7 +1223,7 @@ async function boot(): Promise<void> {
     sparks.update(dt);
     dust.update(dt);
     // Weather: the monsoon storm through the middle of the night, lightning and thunder with it.
-    const weather = state === 'title' ? 'clear' : missions.def ? WEATHER[missions.def.id] ?? 'clear' : 'clear';
+    const weather = debugWeather ?? (state === 'title' ? 'clear' : missions.def ? WEATHER[missions.def.id] ?? 'clear' : 'clear');
     rain.level = weather === 'storm' ? 1 : weather === 'drizzle' ? 0.35 : 0;
     lightning.enabled = weather === 'storm' && !cinema.playingShots;
     rain.update(rdt, camera.position);
@@ -1172,7 +1316,18 @@ async function boot(): Promise<void> {
       camera.fov = fov0 - punch * punch * 4;
       camera.updateProjectionMatrix();
     }
+    // Camera shake, also for this render only.
+    if (shakeT > 0) {
+      shakeT = Math.max(0, shakeT - rdt);
+      const k = shakeAmp * (shakeT / shakeLen) * 0.25;
+      shakeOff.set(Math.sin(now * 0.071) * k, Math.sin(now * 0.093 + 1.3) * k, Math.sin(now * 0.057 + 2.1) * k);
+      camera.position.add(shakeOff);
+    }
     renderer.render(scene, camera);
+    if (shakeT > 0 || shakeOff.x !== 0) {
+      camera.position.sub(shakeOff);
+      if (shakeT === 0) shakeOff.set(0, 0, 0);
+    }
     if (punch > 0) {
       camera.fov = fov0;
       camera.updateProjectionMatrix();

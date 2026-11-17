@@ -131,6 +131,12 @@ export interface MissionContext {
   track?: (e: GoalEvent, n?: number) => void;
   /** Plays a scripted scene (cutscene.ts). Without it, `cutscene` steps are skipped. */
   cutscene?: (id: string) => Promise<void>;
+  /** A mission (re)starts at `step`: main sets the gate and other world state for it. */
+  onBegin?: (index: number, step: number) => void;
+  /** "7:50 PM, CAFETERIA" at the start of a mission. */
+  locationCard?: (clock: string, place: string) => void;
+  /** A drone's alarm passed 60%: MITRA's spotted line and the alarm stinger (main rate-limits them). */
+  spotted?: () => void;
 }
 
 export class Missions {
@@ -183,6 +189,8 @@ export class Missions {
   /** A drone's alarm went high without catching the player (a close call when it drops). */
   private closeCall = false;
   private tmp = new THREE.Vector3();
+  private locationPending = false;
+  private alarmHigh = false;
   /** Floor height for people and items (steps, landings and terraces included). */
   private surface: { heightAt(x: number, z: number): number };
   /**
@@ -278,10 +286,13 @@ export class Missions {
     });
     if (step === 0 && d.kartAt && !this.c.inKart()) this.c.placeKart?.(d.kartAt.x, d.kartAt.z, d.kartAt.heading);
     this.c.onSky(d.sky);
+    this.c.onBegin?.(index, step);
+    // The location card appears with the first step that is not a cutscene.
+    this.locationPending = !!d.location;
     const epoch = this.epoch;
     // A mission that opens on a cutscene has its own opening; the standard intro shot would double it.
     if (d.steps[step]?.kind === 'cutscene') {
-      // (TODO Phase 4: the typed location card goes here.)
+      // The cutscene is the opening.
     } else if (this.c.intro) await this.c.intro(d, index, step === 0 ? this.firstSpot(d) : null);
     else {
       this.c.ui.banner(`Mission ${index + 1} · ${d.title}`, `${d.clock} — ${d.brief}`);
@@ -355,6 +366,11 @@ export class Missions {
 
   /** Close calls: the alarm went past half and dropped back to nothing. */
   private watchClose(alarm: number, x: number, z: number): void {
+    // MITRA notices when the alarm first passes 60% (and again only after it has cooled down).
+    if (alarm > 0.6 && !this.alarmHigh) {
+      this.alarmHigh = true;
+      this.c.spotted?.();
+    } else if (alarm < 0.25) this.alarmHigh = false;
     if (alarm > 0.55 && alarm < 1) this.closeCall = true;
     else if (this.closeCall && alarm < 0.04) {
       this.closeCall = false;
@@ -421,6 +437,10 @@ export class Missions {
     }
     this.saveCurrent();
     this.refreshHud();
+    if (this.locationPending && st.kind !== 'cutscene' && d.location) {
+      this.locationPending = false;
+      this.c.locationCard?.(d.clock, d.location);
+    }
     switch (st.kind) {
       case 'radio': {
         this.busy = true;
