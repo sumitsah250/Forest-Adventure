@@ -1242,7 +1242,12 @@ export class CampusUI implements ModalHost {
   }
 
   /** The end of the story. */
-  ending(s: { coins: number; stars: string; level: number; title: string; seconds: number; accuracy: number }, onRoam: () => void, onMissions: () => void, onTitle: () => void): void {
+  ending(
+    s: { coins: number; stars: string; level: number; title: string; seconds: number; accuracy: number },
+    onRoam: () => void, onMissions: () => void, onTitle: () => void,
+    /** Story 2: minutes left on the sunrise clock, and the share card. */
+    v2?: { minutes: string; minutesLabel: string; shareLabel: string; onShare: () => void },
+  ): void {
     const ov = this.open('cq-overlay--ending');
     const box = el('div', 'cq-title cq-ending');
     box.innerHTML = `
@@ -1252,7 +1257,7 @@ export class CampusUI implements ModalHost {
       <div class="cq-ending__grid">
         <div><span>★ ${esc(s.stars)}</span>stars</div>
         <div><span>${s.coins.toLocaleString()}</span>◈ coins</div>
-        <div><span>${s.accuracy}</span>riddles cracked</div>
+        ${v2 ? `<div><span>${esc(v2.minutes)}</span>${esc(v2.minutesLabel)}</div>` : `<div><span>${s.accuracy}</span>riddles cracked</div>`}
       </div>
       <p class="cq-title__blurb">Every mission can be replayed for three stars. 24 memory shards are hidden around campus, and Kalki's time trial is waiting for a record.</p>`;
     const menu = el('div', 'cq-menu');
@@ -1262,6 +1267,12 @@ export class CampusUI implements ModalHost {
     m.onclick = onMissions;
     const t = el('button', 'cq-btn', 'Title screen');
     t.onclick = onTitle;
+    if (v2) {
+      const share = el('button', 'cq-btn cq-btn--primary', esc(v2.shareLabel));
+      share.onclick = v2.onShare;
+      menu.append(share);
+      roam.classList.remove('cq-btn--primary');
+    }
     menu.append(roam, m, t);
     box.append(menu);
     ov.append(box, confetti(120));

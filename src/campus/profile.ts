@@ -50,6 +50,8 @@ export interface Profile {
   minutes: number;
   /** Lines heard over the radio or from MITRA, oldest first, to read again (the last 80). */
   radioLog: { m: string; who: string; text: string; clue?: string; pinned?: boolean }[];
+  /** V2: the answers to the story's choices with no wrong answer (mission 10: 'remember' or 'forget'). */
+  choices: Record<string, string>;
 }
 
 function fresh(): Profile {
@@ -80,6 +82,7 @@ function fresh(): Profile {
     clues: {},
     minutes: 30,
     radioLog: [],
+    choices: {},
   };
 }
 
@@ -144,6 +147,7 @@ export function resetStory(p: Profile): void {
   p.clues = {};
   p.minutes = 30;
   p.radioLog = [];
+  p.choices = {};
 }
 
 export function has(p: Profile, unlock: string): boolean {

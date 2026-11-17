@@ -511,3 +511,34 @@ export function choose(host: ModalHost, o: { title: string; question: string; op
   });
   return f.promise;
 }
+
+/** A choice with no wrong answer (mission 10's last question). Resolves with the option's index. */
+export function decide(host: ModalHost, o: { title: string; question: string; options: string[] }): Promise<number> {
+  return new Promise((resolve) => {
+    const ov = host.open('cq-overlay--quiz');
+    const card = el('div', 'cq-quiz decide');
+    card.append(el('div', 'cq-quiz__head', `<span>${esc(o.title)}</span>`), el('div', 'cq-quiz__q', esc(o.question)));
+    const list = el('div', 'cq-quiz__opts');
+    const pick = (i: number) => {
+      host.onSound?.('click');
+      host.close();
+      resolve(i);
+    };
+    o.options.forEach((opt, i) => {
+      const b = el('button', 'cq-quiz__opt', `<kbd>${i + 1}</kbd><span></span>`);
+      (b.querySelector('span') as HTMLSpanElement).textContent = opt;
+      b.onclick = () => pick(i);
+      list.append(b);
+    });
+    card.append(list);
+    if (TEST) card.dataset.answer = '1';
+    ov.append(card);
+    host.keyHandler = (e) => {
+      const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+      if (n >= 0 && n < o.options.length) {
+        e.preventDefault();
+        pick(n);
+      }
+    };
+  });
+}

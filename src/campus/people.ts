@@ -118,3 +118,28 @@ function lineLength(p: Pt[]): number {
   for (let i = 0; i < p.length - 1; i += 1) s += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]);
   return s;
 }
+
+/**
+ * C10: students pouring in through the main gate. They start in a loose column outside the gate
+ * (`gate`, with `inward` the road from the gate into campus) and walk the road in.
+ */
+export function crowd(scene: THREE.Scene, ground: CampusGround, physics: PhysicsWorld, gate: Pt, inward: Pt[], n: number): Person[] {
+  const rng = mulberry32(706);
+  const surface = walkSurface(ground, physics);
+  const [ix, iz] = inward[0];
+  const len = Math.hypot(ix - gate[0], iz - gate[1]) || 1;
+  // Out of campus is away from the first inward point; sideways is across the road.
+  const ox = (gate[0] - ix) / len;
+  const oz = (gate[1] - iz) / len;
+  const people: Person[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const back = 3 + (i >> 1) * 1.7 + rng() * 0.8;
+    const side = ((i & 1) ? 1 : -1) * (0.5 + rng() * 1.3);
+    const x = gate[0] + ox * back - oz * side;
+    const z = gate[1] + oz * back + ox * side;
+    const p = new Person(scene, STUDENTS[i % STUDENTS.length], surface, physics, x, z, Math.atan2(-ox, -oz));
+    p.walkOnce([[x, z], [gate[0] - oz * side, gate[1] + ox * side], ...inward.map(([px, pz]) => [px - oz * side * 0.8, pz + ox * side * 0.8] as Pt)], 1.3 + rng() * 0.4);
+    people.push(p);
+  }
+  return people;
+}

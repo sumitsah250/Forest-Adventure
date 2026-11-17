@@ -126,6 +126,16 @@ MISSIONS.forEach((m, mi) => {
         }
         break;
       case 'board':
+      case 'checkpoint':
+        break;
+      case 'accuse':
+        if (m.id !== 'v2-whodunit') err(`${ctx}: the accusation belongs in mission 9`);
+        break;
+      case 'decide':
+        speaker(s.from, ctx, false);
+        checkCard(s.question, `${ctx} question`);
+        if (s.options.length !== s.values.length || s.options.length !== s.lines.length) err(`${ctx}: options, values and lines must have the same length`);
+        s.lines.forEach((ls, o) => ls.forEach((l, k) => checkCard(l, `${ctx} option ${o + 1} card ${k + 1}`)));
         break;
       case 'run':
         speaker(s.npc, ctx, true);

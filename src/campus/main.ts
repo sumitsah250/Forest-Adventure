@@ -20,19 +20,21 @@ import type { TerrainData } from '../world/terrain.ts';
 import { DATA, GATE, WORLD_HALF, centroid, pointInPoly } from './geo.ts';
 import { CampusGround } from './ground.ts';
 import { buildCampus } from './world.ts';
-import { populate, type Person } from './people.ts';
+import { crowd, populate, type Person } from './people.ts';
+import { GATE_ROAD } from './story/routes.ts';
+import { openShareCard } from './share.ts';
 import { PLAYER_SUIT } from '../character/humanoid.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
 import { Extras } from './extras.ts';
-import { CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky, type Where } from './story.ts';
+import { ACCUSATION, WRONG_ACCUSATION, CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky, type Where } from './story.ts';
 import { LocationCard, addToBoard, leaderboard, nameEntry } from './screens.ts';
 import { DebugPanel } from './debug.ts';
 import { Cutscenes } from './cutscene.ts';
 import { Subtitles } from './dialogue.ts';
 import { Portraits } from './portraits.ts';
-import { CampusScreens, DoorCut, DroneEyes, MudSlide, Tarp, festBanner } from './props.ts';
+import { CampusScreens, DoorCut, DroneEyes, Motorbike, MudSlide, Tarp, festBanner } from './props.ts';
 import { ClueBook } from './clues.ts';
 import { openBoard } from './evidence.ts';
 import { createPlayerHumanoid } from '../character/playerModel.ts';
@@ -247,7 +249,34 @@ async function boot(): Promise<void> {
   const droneEyes = new DroneEyes();
   const doorCut = new DoorCut();
   const mud = new MudSlide();
-  scene.add(tarp.obj, droneEyes.group, doorCut.obj, mud.obj);
+  const bike = new Motorbike();
+  scene.add(tarp.obj, droneEyes.group, doorCut.obj, mud.obj, bike.obj);
+  // C8: the clock spinning through the night (digits from tables, so nothing is allocated per frame).
+  const clockEl = document.createElement('div');
+  clockEl.className = 'cq-clockspin';
+  clockEl.innerHTML = '<span></span>:<span></span> <small></small>';
+  uiRoot.append(clockEl);
+  const [clockH, clockM, clockAp] = Array.from(clockEl.children) as HTMLElement[];
+  const HOURS = ['12', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'];
+  const MINS = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+  let clockFrom = 0;
+  let clockTo = 0;
+  let clockT = -1;
+  let clockOver = 1;
+  let clockShown = -1;
+  const parseClock = (s: string) => {
+    const [h, m] = s.split(':').map(Number);
+    return h * 60 + m;
+  };
+  // C8: the rain dying away; -1 means the weather decides.
+  let rainCut = -1;
+  let rainCutTo = 0;
+  let rainCutRate = 1;
+  // C10: the credits roll.
+  const creditsEl = document.createElement('div');
+  creditsEl.className = 'cq-credits';
+  uiRoot.append(creditsEl);
+  let crowdSpawned = false;
   // Clues (story 2): gold and silver cards.
   const clueBook = STORY_VERSION === 2 ? new ClueBook(uiRoot, CLUES, profile, V2_TEXT.clueUi, (n) => audio.play(n), () => saveProfile(profile)) : null;
   // C5: Asha's radio portrait breaking into static.
@@ -426,9 +455,11 @@ async function boot(): Promise<void> {
   let skyFrom: AtmosphereState = AFTERNOON;
   let skyTo: AtmosphereState = AFTERNOON;
   let skyT = 1;
+  let skyDur = 2.5;
   let night = false;
-  const setSky = (to: AtmosphereState, instant = false) => {
+  const setSky = (to: AtmosphereState, instant = false, dur = 2.5) => {
     if (to === skyTo && skyT >= 1) return;
+    skyDur = dur;
     skyFrom = {
       ...atmosphere.state, zenith: atmosphere.state.zenith.clone(), horizon: atmosphere.state.horizon.clone(),
       fog: atmosphere.state.fog.clone(), sunColor: atmosphere.state.sunColor.clone(),
@@ -584,6 +615,32 @@ async function boot(): Promise<void> {
         lookEl.classList.remove('on');
       };
     },
+    accuse: () => openBoard(ui, {
+      clues: CLUES,
+      state: (id) => profile.clues[id] ?? null,
+      name: (id) => NPCS.find((n) => n.id === id)?.name ?? id,
+      portrait: (id) => portraits.get(id),
+      text: V2_TEXT.clueUi,
+      sound: (n) => audio.play(n),
+      mode: 'accuse',
+      questions: ACCUSATION,
+      culprit: 'sunil',
+      clearing: WRONG_ACCUSATION,
+      // A wrong accusation costs 15 minutes on the sunrise clock.
+      onWrong: () => {
+        profile.minutes = Math.max(0, profile.minutes - 15);
+        saveProfile(profile);
+      },
+    }),
+    bike,
+    onStep: (st) => {
+      // Mission 10: Sunil opens the main gate from his phone as the chase starts (decision 9).
+      if (st.kind === 'chase' && st.bike) {
+        gateTo = 1;
+        gateRate = 1 / 1.6;
+        audio.play('gateCreak');
+      }
+    },
     onBegin: (index) => {
       powerHold = null;
       updateScreens();
@@ -659,6 +716,49 @@ async function boot(): Promise<void> {
     },
     silence: () => undefined,
     dronesBlue: () => droneEyes.turnBlue(),
+    bike: (e) => {
+      if (e.arg === 'skid') {
+        bike.skid(1);
+        audio.play('skid', bike.obj.position);
+      } else if (e.arg === 'hide') bike.hide();
+    },
+    sky: (e) => {
+      const s = SKIES[e.arg as Sky];
+      if (s) setSky(s, !e.over, e.over || 2.5);
+    },
+    clock: (e) => {
+      const [a, b] = (e.arg ?? '').split('|');
+      clockFrom = parseClock(a);
+      clockTo = parseClock(b);
+      if (clockTo < clockFrom) clockTo += 24 * 60;
+      clockT = 0;
+      clockOver = e.over ?? 4;
+      clockShown = -1;
+      clockEl.classList.add('on');
+    },
+    rain: (e) => {
+      if (rainCut < 0) rainCut = rain.level;
+      rainCutTo = e.value ?? 0;
+      rainCutRate = e.over ? Math.max(0.01, Math.abs(rainCutTo - rainCut) / e.over) : Infinity;
+    },
+    crowd: (e) => {
+      if (crowdSpawned) return;
+      crowdSpawned = true;
+      const inward = [...GATE_ROAD].reverse().slice(1);
+      people.push(...crowd(scene, ground, physics, GATE, inward, e.value ?? 16));
+      audio.play('crowd');
+    },
+    credits: (e) => {
+      creditsEl.replaceChildren(...V2_TEXT.ending.credits.map((line, i) => {
+        const p = document.createElement(i === 0 ? 'h3' : 'p');
+        p.textContent = line;
+        return p;
+      }));
+      creditsEl.style.setProperty('--roll', `${e.over ?? 8}s`);
+      creditsEl.classList.remove('on');
+      void creditsEl.offsetWidth;
+      creditsEl.classList.add('on');
+    },
     drones: (e, at) => droneEyes.show(e.value ?? 0, at),
     tarp: (e) => (e.arg === 'on' ? tarp.cover(kart.position, kart.heading) : tarp.pull()),
     headlights: (e) => kart.vehicle.setLights(!!e.value),
@@ -682,6 +782,7 @@ async function boot(): Promise<void> {
       if (ref === 'player') return (out) => (out.copy(player.renderPos), player.facing + Math.PI);
       if (ref === 'kart') return (out) => (out.copy(kart.position), kart.heading);
       if (ref === 'gate') return (out) => (out.set(world.gate.x, world.gate.y, world.gate.z), world.gate.heading);
+      if (ref === 'bike') return (out) => (out.copy(bike.obj.position), bike.obj.rotation.y);
       if (ref.startsWith('npc:')) {
         const n = missions.npcSpot(ref.slice(4));
         return n ? (out) => (out.copy(n.pos), n.facing()) : null;
@@ -705,6 +806,10 @@ async function boot(): Promise<void> {
       powerTo = powerFor();
       powerRate = 0.05;
       glowMin = 0;
+      clockT = -1;
+      clockEl.classList.remove('on');
+      creditsEl.classList.remove('on');
+      rainCut = -1;
       if (state === 'play' && !ui.modal) lockOrPrompt();
     },
     baseFov: () => settings.fov,
@@ -747,7 +852,13 @@ async function boot(): Promise<void> {
     if (!last) cinema.release();
     if (choice === 'garage') await new Promise<void>((res) => openGarage(res));
     if (last) {
-      ui.ending(
+      // Story 2: the share card, then back to the ending screen.
+      const share = () => void openShareCard(ui, {
+        text: V2_TEXT.share, name: profile.name, roll: profile.roll, minutes: profile.minutes,
+        stars: starsTotal(profile), maxStars: MISSIONS.length * 3, choice: profile.choices.mitraMemory,
+        face: portraits.canvas('player'), sound: (n) => audio.play(n),
+      }).then(showEnding);
+      const showEnding = () => ui.ending(
         { coins: profile.coins, stars: totalStars(), level: lv.level, title: titleFor(lv.level), seconds: profile.stats.seconds, accuracy: profile.stats.correct },
         () => {
           cinema.release();
@@ -763,7 +874,11 @@ async function boot(): Promise<void> {
           cinema.release();
           toTitle();
         },
+        STORY_VERSION === 2
+          ? { minutes: String(profile.minutes), minutesLabel: V2_TEXT.share.minutesLabel, shareLabel: V2_TEXT.share.button, onShare: share }
+          : undefined,
       );
+      showEnding();
       return;
     }
     if (nextIndex >= 0) await missions.begin(nextIndex);
@@ -1253,7 +1368,7 @@ async function boot(): Promise<void> {
 
     // Sky blend (missions change the time of day), then the image-based light once settled.
     if (skyT < 1) {
-      skyT = Math.min(1, skyT + dt / 2.5);
+      skyT = Math.min(1, skyT + rdt / skyDur);
       atmosphere.blend(skyFrom, skyTo, THREE.MathUtils.smoothstep(skyT, 0, 1), scene);
       const dark = (s: AtmosphereState) => s === SKIES.night || s === SKIES.predawn;
       atmosphere.skyUniforms.uSunVisible.value = dark(skyTo) ? (dark(skyFrom) ? 0 : 1 - skyT) : dark(skyFrom) ? skyT : 1;
@@ -1347,6 +1462,24 @@ async function boot(): Promise<void> {
     document.body.classList.toggle('cq-cinematic', cinema.active || cutscenes.playing);
     tarp.update(rdt);
     mud.update(rdt);
+    bike.update(dt);
+    // C8: the clock spinning through the night.
+    if (clockT >= 0) {
+      clockT += rdt;
+      const f = Math.min(1, clockT / clockOver);
+      const m = Math.round(clockFrom + (clockTo - clockFrom) * f * f * (3 - 2 * f)) % (24 * 60);
+      if (m !== clockShown) {
+        clockShown = m;
+        const h = Math.floor(m / 60);
+        clockH.textContent = HOURS[h % 12];
+        clockM.textContent = MINS[m % 60];
+        clockAp.textContent = h < 12 ? 'AM' : 'PM';
+      }
+      if (clockT > clockOver + 1.5) {
+        clockT = -1;
+        clockEl.classList.remove('on');
+      }
+    }
     // The drone cutting the Power House door: sparks from the tip of the cut.
     if (doorCut.obj.visible && Math.random() < 0.7) {
       sv.set((Math.random() - 0.5) * 3, 1 + Math.random() * 2.5, (Math.random() - 0.5) * 3);
@@ -1401,6 +1534,11 @@ async function boot(): Promise<void> {
     rain.level = weather === 'storm' ? 1 : weather === 'drizzle' ? 0.35 : 0;
     // A fading-clue step turns the drizzle into a downpour as it runs.
     if (missions.rainBoost > 0) rain.level = Math.max(rain.level, 0.35 + 0.65 * missions.rainBoost);
+    // A cutscene easing the rain away (C8).
+    if (rainCut >= 0) {
+      rainCut += THREE.MathUtils.clamp(rainCutTo - rainCut, -rdt * rainCutRate, rdt * rainCutRate);
+      rain.level = rainCut;
+    }
     lightning.enabled = weather === 'storm' && !cinema.playingShots;
     rain.update(rdt, camera.position);
     sound.setRain(rain.level, rdt);

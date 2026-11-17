@@ -28,15 +28,29 @@ Work is on the `story-v2` branch, one commit per phase.
 - **Cutscenes**: C3, C4, C5, C6 with shot data.
 - `node scripts/campus-test.mjs play low 2` plays story 2 from the name screen to the ending through the real UI (all 11 missions).
 
+### Phase 6: the accusation, Before Sunrise, the ending and the share card
+- **M9 accusation** on the evidence board: pick a suspect, drag or tap one card onto each of the three questions, Accuse. A wrong suspect costs 15 minutes and lights up the cards that clear them; the right one plays C7 (red string, cold portrait). The questions stay pinned at the bottom of the board on small screens.
+- **M10 in four parts with checkpoints**: a failure restarts the current part ("Retry this part").
+- **Sunil's motorbike**: a low-poly bike with a helmeted rider (`Motorbike` in props.ts). He opens the main gate from his phone and rides the ring road to it, never more than 60 m ahead and never caught.
+- **C8** (timelapse sky, the clock spinning from 11:40 PM to 5:20 AM, rain dying away, title card), **C9** (slow motion, the bike skids and falls, MITRA shuts the gate, Bahadur Dai), **C10** (sunrise, the gate opens, 18 students walk in, credits).
+- **Bahadur Dai** at the gate after C9: he takes the pen drive off Sunil and hands it over.
+- **Final choice**: remember or forget. It is saved, and changes MITRA's last line and the share card.
+- **Ending screen** (story 2): minutes to spare, and a **Share card** button: a 1080 × 1350 image to download, or to share on phones (Web Share).
+- `check:story` reports **0 stubs**; every referenced cutscene has shot data.
+- New sounds: motorbike rev, tyre skid, crowd cheer (synthesised).
+
 ## Left
-- Phase 6: M9 accusation on the board, motorbike chase, gate shut and Bahadur Dai (C9), M10 checkpoints and the final choice, C7 wiring, C8, C10, share card.
-- Phases 7 to 9 (see BUILD_PLAN.md).
+- Phase 7: the mini-games, interludes, the long wait after M9 (Krishna Dai and c13), old riddles on memory shards.
+- Phase 8: sound direction and music (including the music cut in C7), MITRA's voice, par times, performance presets, strings export.
+- Phase 9: graphics, mobile, Kalki, menu (see BUILD_PLAN.md).
 
 ## How to test
 - `npm run dev`, then `http://localhost:5173/campus.html?story=2`. A new browser profile (or a cleared save) shows the name screen first.
 - Debug: `http://localhost:5173/campus.html?story=2&debug=1`, click DEBUG at the bottom left.
 - Demo: `http://localhost:5173/campus.html?demo=1`.
 - Checks: `npx tsc --noEmit`, `npm run build`, `npm run check:story`, `npm run test:smoke`.
+- Whole story through the real UI: `node scripts/campus-test.mjs play low 2` (screenshots in `test-results/`).
+- Phase 6 by hand: debug panel → M9, talk your way to the board; or M10 to watch C8, then drive the chase to the gate for C9. Finishing the story for the first time (M10, then the Sunrise Fest scene) shows the ending screen with the share card.
 
 ## Next step
-Phase 6: replace M9's `choose` step with an `accuse` step that opens `openBoard(..., { mode: 'accuse' })` (wrong suspect: −15 minutes and MITRA's clearing line), then the motorbike chase in M10.
+Phase 7: build the mini-game framework on `runMini` (src/campus/minigames.ts), starting with Signal Tuner and Chiya Rush (which gives c13), then the interludes between missions (decision 17) with debug jumps.

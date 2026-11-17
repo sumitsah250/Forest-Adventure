@@ -17,7 +17,7 @@ Choices made while building Story V2 where the spec ([STORY_V2.md](STORY_V2.md))
 | 6 | Portraits | Rendered once at load from each character's in-game 3D model. No art files. |
 | 7 | BP Park has no job in M7 (AUDIT conflict 5) | Bhurtyal sir waits for the player at BP Park instead of at his department. |
 | 8 | Power in V2 | Dies at 6:52 PM (C1), comes back all at once at the end of M3 (C3), and stays on. |
-| 9 | Where the main gate stands open or shut | Open until the slam at the end of M1. Shut from M2 to M9. In M10 Sunil opens it from the exam console as he flees, so it stands open during the chase until MITRA shuts it (C9). It opens for good in the ending (C10). |
+| 9 | Where the main gate stands open or shut | Open until the slam at the end of M1. Shut from M2 to M9. In M10 Sunil opens it from his phone as he flees (decision 30), so it stands open during the chase until MITRA shuts it (C9). It opens for good in the ending (C10). |
 | 10 | When c1 and c2 become silver if missed | Quietly, when M9 starts, so they are on the board before the accusation. |
 | 11 | Third star in clue missions | Every clue of that mission gold replaces the par-time condition (no hearts lost is still needed). Beating par still earns +1 minute to spare. Clue missions are M2, M3, M4, M5, M6 and M9. M7 and M8 give their clues gold automatically, so they use the normal rule. |
 | 12 | The campus screens | Show the player's face, name, roll number and "INTRUDER" from the end of M3 until the culprit is named in M9, then "CASE REOPENED" until the reboot, then "HERO OF WRC". |
@@ -36,3 +36,11 @@ Choices made while building Story V2 where the spec ([STORY_V2.md](STORY_V2.md))
 | 25 | M4 rain fade | Each uncollected clue object fades over 90 s once the rain starts. A clue that fades is picked up later as silver by Asha at mission end, so the story always moves on. |
 | 26 | Minutes to spare | Start at 30. A failed attempt costs 3, beating par gives 1 back, a wrong accusation costs 15. At 0 or below, M10's par times are 20% tighter. |
 | 27 | The campus screens in V2 | Four wall screens (RIC, Administration Block, Cafeteria, Power House) share one canvas texture, redrawn only when the text or mode changes. They are dark until the power returns in C3. |
+| 28 | C7 length | About 5 s on the board (string, then the cold portrait) instead of the spec's 12 s: it is a UI moment, and the board has no camera to move. Sunil's cold line follows straight after on the radio. |
+| 29 | Sunil's motorbike chase | It waits on the east ring road until Kalki is within 45 m. It never gets more than 60 m ahead (it stops and waits), speeds up when Kalki is within 12 m, and cannot be caught; the chase ends when it reaches the gate road, then C9. The 120 s timer still applies. |
+| 30 | Who opens the gate in M10 | Sunil, from his phone, as the chase starts (the gate swings open over 1.6 s). MITRA shuts it in C9. |
+| 31 | Bahadur Dai at the gate | He waits just inside the main gate for all of M10 (the guard's place at dawn). After C9 the player talks to him; he takes the pen drive off Sunil and hands it over, which leads into the reboot part. |
+| 32 | Checkpoints | A `checkpoint` step marks the start of each M10 part. A failure restarts at the last checkpoint ("Retry this part") and still costs 3 minutes. Restarting from the pause menu still restarts the whole mission. |
+| 33 | The final choice | Stored in the save (`choices.mitraMemory`). It picks MITRA's last line in M10 and the line under the stars on the share card; nothing else changes. |
+| 34 | Credits | Rolled during the last shot of C10, from `ending.credits` in text.ts. They name the campus as the setting and say the story is fiction, so nobody reads it as an official campus production. |
+| 35 | Share card | 1080 × 1350 PNG drawn on a canvas: name, roll number, portrait, minutes to spare, total stars and the MITRA line. Download always; Share only where the browser can share files. |

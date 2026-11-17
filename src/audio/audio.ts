@@ -785,6 +785,41 @@ export class AudioEngine implements SfxApi {
         this.tone(out, t, 317, 300, 1.2, 0.12, 'triangle');
         for (let i = 1; i <= 3; i += 1) this.burst(out, t + i * 0.32, { buf: this.brown, type: 'lowpass', freq: 380, dur: 0.5, vol: 0.45 / i });
         break;
+      case 'bikeRev': {
+        // A single-cylinder motorbike blipping the throttle: a rough pulse train rising, then falling.
+        const g = c.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.5, t + 0.08);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+        const o = c.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(42, t);
+        o.frequency.exponentialRampToValueAtTime(128, t + 0.45);
+        o.frequency.exponentialRampToValueAtTime(70, t + 1.4);
+        const lp = c.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 900;
+        o.connect(lp).connect(g).connect(out);
+        o.start(t);
+        o.stop(t + 1.45);
+        this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 300, dur: 1.2, vol: 0.3, attack: 0.05 });
+        break;
+      }
+      case 'skid':
+        // Tyre screech: narrow-band noise sliding down, with a little wobble.
+        this.burst(out, t, { buf: this.white, type: 'bandpass', freq: 2300, q: 9, dur: 1.3, vol: 0.45, attack: 0.03 });
+        this.burst(out, t + 0.05, { buf: this.pink, type: 'bandpass', freq: 1500, q: 7, dur: 1.1, vol: 0.3, attack: 0.05 });
+        this.tone(out, t, 1900, 1300, 1.2, 0.03, 'sawtooth');
+        break;
+      case 'crowd':
+        // Students cheering at the gate: many short voiced bursts and a wash of noise.
+        out.connect(this.reverbSend);
+        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 1100, q: 0.8, dur: 3.5, vol: 0.35, attack: 0.6 });
+        for (let i = 0; i < 14; i += 1) {
+          const f = 280 + Math.random() * 420;
+          this.tone(out, t + Math.random() * 2.4, f, f * (1.1 + Math.random() * 0.3), 0.25 + Math.random() * 0.3, 0.025, 'triangle');
+        }
+        break;
       case 'speakers':
         // The campus PA waking up: a hum and a squeal of feedback.
         out.connect(this.reverbSend);

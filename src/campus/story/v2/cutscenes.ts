@@ -30,6 +30,21 @@
 //   drones      value count, place         MITRA drones appear there and their red eyes open (0 removes them)
 //   tarp        arg 'on' | 'off'           the tarp over Kalki
 //   headlights  value 1 | 0                Kalki's headlights
+//   gate        value 0..1, over seconds   the main gate (1 open, 0 shut)
+//   shake       value strength, over s     camera shake
+//   screens     arg 'intruder' | 'reopened' | 'hero' | 'off'   the campus screens
+//   lightning                              one lightning strike
+//   mud         place                      mud slides off the bank there (C4)
+//   radioStatic arg cast id, over seconds  that radio portrait breaks into static (C5)
+//   silence     over seconds               nothing (a beat of quiet; music ducks in Phase 8)
+//   dronesBlue                             every drone eye turns blue (C6)
+//   bike        arg 'skid' | 'hide'        Sunil's motorbike skids and falls, or is removed
+//   sky         arg 'dusk' | 'night' | 'predawn' | 'dawn', over seconds (0: at once)
+//   clock       arg 'HH:MM|HH:MM', over s  a big clock spins from one time to the other (C8)
+//   rain        value 0..1, over seconds   rain strength, until the cutscene ends
+//   crowd       value count                students walk in through the main gate (C10)
+//   credits     over seconds               the credits roll (text in text.ts, ending.credits)
+// Entities: 'player', 'kart', 'gate', 'bike' (Sunil's motorbike) and 'npc:<id>'.
 // A skipped cutscene still runs every event, so the world always ends in the same state.
 //
 // All text is in text.ts. Check your shots with `npm run check:story`.
@@ -289,6 +304,139 @@ export const CUTSCENES: Partial<Record<CutsceneId, CutsceneDef>> = {
           { at: 2.7, who: 'mitra', text: T.m7.c6Mitra2, dur: 2.2 },
         ],
         events: [{ at: 4.9, do: 'drones', value: 0 }],
+      },
+    ],
+  },
+
+  // C8, before mission 10, 8 s: timelapse from night to pre-dawn over the campus, the clock
+  // spinning from 11:40 PM to 5:20 AM, the rain dying away. Then the mission's title card.
+  C8: {
+    shots: [
+      {
+        dur: 7,
+        path: [
+          { where: { building: RIC }, off: [-50, 46, 60] },
+          { where: { building: RIC }, off: [-40, 50, 45] },
+          { where: { building: RIC }, off: [-30, 54, 30] },
+        ],
+        look: [{ where: { building: RIC }, off: [-60, 120, -700] }, { where: { building: RIC }, off: [-160, 260, -1400] }],
+        ease: 'linear',
+        fov: [52, 48],
+        events: [
+          { at: 0, do: 'sky', arg: 'night' },
+          { at: 0, do: 'rain', value: 0.6 },
+          { at: 0.4, do: 'clock', arg: '23:40|05:20', over: 5.8 },
+          { at: 0.6, do: 'sky', arg: 'predawn', over: 5.8 },
+          { at: 0.8, do: 'rain', value: 0, over: 4.5 },
+        ],
+      },
+      {
+        dur: 2.2,
+        path: [
+          { where: { building: RIC }, off: [-30, 54, 30] },
+          { where: { building: RIC }, off: [-27, 55, 27] },
+          { where: { building: RIC }, off: [-24, 56, 24] },
+        ],
+        look: { where: { building: RIC }, off: [-160, 260, -1400] },
+        ease: 'out',
+        card: { kicker: T.m10.c8Kicker, title: T.m10.title, sub: T.m10.brief },
+      },
+    ],
+  },
+
+  // C9, mission 10 climax, 10 s: slow motion as Sunil's motorbike skids at the gate road, MITRA
+  // swings the main gate shut in front of him, and Bahadur Dai steps out.
+  C9: {
+    shots: [
+      {
+        dur: 4,
+        path: [
+          { entity: 'gate', off: [7, 1.4, 4], local: true },
+          { entity: 'gate', off: [6.5, 1.2, 5.5], local: true },
+          { entity: 'gate', off: [6, 1.1, 7], local: true },
+        ],
+        look: [{ entity: 'bike', off: [0, 0.8, 0] }, { entity: 'gate', off: [0, 1.5, 0] }],
+        ease: 'inOut',
+        fov: [44, 50],
+        timeScale: 0.3,
+        sounds: [{ at: 0.6, name: 'gateCreak' }, { at: 2.1, name: 'gateSlam' }],
+        subtitles: [{ at: 0.5, who: 'mitra', text: T.m10.c9Mitra, dur: 2 }],
+        events: [
+          { at: 0, do: 'gate', value: 1, over: 0 },
+          { at: 0.3, do: 'bike', arg: 'skid' },
+          { at: 0.6, do: 'gate', value: 0, over: 1.5 },
+          { at: 2.1, do: 'shake', value: 0.5, over: 0.6 },
+        ],
+      },
+      {
+        dur: 3,
+        path: [
+          { entity: 'gate', off: [-9, 4.5, 26], local: true },
+          { entity: 'gate', off: [-7, 3.6, 22], local: true },
+          { entity: 'gate', off: [-5, 3, 18], local: true },
+        ],
+        look: { entity: 'gate', off: [0, 1.4, 6], local: true },
+        ease: 'out',
+        subtitles: [{ at: 0.2, who: 'mitra', text: T.m10.c9Mitra2, dur: 2.7 }],
+      },
+      {
+        dur: 3,
+        path: [
+          { entity: 'npc:bahadur', off: [-4, 2.2, 4] },
+          { entity: 'npc:bahadur', off: [-3, 1.9, 3.2] },
+          { entity: 'npc:bahadur', off: [-2.2, 1.7, 2.6] },
+        ],
+        look: { entity: 'npc:bahadur', off: [0, 1.5, 0] },
+        ease: 'out',
+        fov: [48, 42],
+        sounds: [{ at: 0.3, name: 'thunk' }],
+      },
+    ],
+  },
+
+  // C10, the ending, 25 s: sunrise over the Annapurna range, the gates open, students pour in.
+  // Credits.
+  C10: {
+    shots: [
+      {
+        dur: 7,
+        path: [
+          { entity: 'gate', off: [0, 6, 34], local: true },
+          { entity: 'gate', off: [0, 10, 46], local: true },
+          { entity: 'gate', off: [0, 16, 60], local: true },
+        ],
+        look: [{ entity: 'gate', off: [0, 3, 0] }, { entity: 'gate', off: [-300, 420, -2400] }],
+        ease: 'inOut',
+        fov: [50, 46],
+        sounds: [{ at: 1, name: 'gateCreak' }, { at: 1.2, name: 'speakers' }],
+        subtitles: [{ at: 1.4, who: 'mitra', text: T.ending.c10Mitra, dur: 3 }],
+        events: [
+          { at: 0, do: 'gate', value: 0, over: 0 },
+          { at: 1, do: 'gate', value: 1, over: 3 },
+          { at: 1.6, do: 'crowd', value: 18 },
+        ],
+      },
+      {
+        dur: 8,
+        path: [
+          { entity: 'gate', off: [7, 1.8, 16], local: true },
+          { entity: 'gate', off: [6, 1.9, 13], local: true },
+          { entity: 'gate', off: [5, 2, 10], local: true },
+        ],
+        look: { entity: 'gate', off: [0, 1.6, -3], local: true },
+        ease: 'linear',
+        card: { kicker: T.ending.c10Kicker, title: T.ending.c10Title, sub: T.ending.brief },
+      },
+      {
+        dur: 10,
+        path: [
+          { entity: 'gate', off: [0, 8, 24], local: true },
+          { entity: 'gate', off: [0, 26, 70], local: true },
+          { where: { point: 'WRC Auditorium' }, off: [30, 40, 50] },
+        ],
+        look: [{ entity: 'gate', off: [0, 2, 30], local: true }, { where: { point: 'WRC Auditorium' }, off: [0, 6, 0] }],
+        ease: 'inOut',
+        events: [{ at: 0, do: 'credits', over: 10 }],
       },
     ],
   },

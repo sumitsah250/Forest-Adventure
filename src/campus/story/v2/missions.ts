@@ -209,9 +209,9 @@ export const MISSIONS: MissionDef[] = [
       },
       { kind: 'talk', npc: 'tiwari', lines: T.m9.tiwari2 },
       { kind: 'read', title: T.m9.consoleTitle, lines: T.m9.console, clue: 'c12' },
-      // Until TODO_P6_EVIDENCE_BOARD_ACCUSE the accusation is a plain three-way choice.
-      { kind: 'choose', npc: 'tiwari', question: T.m9.accuseQuestion, options: T.m9.accuseOptions, answer: 2, why: T.m9.accuseWhy },
-      { kind: 'cutscene', id: 'C7' },
+      { kind: 'talk', npc: 'tiwari', lines: T.m9.tiwariBoard },
+      // The accusation on the evidence board. C7 (the red string) plays on the board itself.
+      { kind: 'accuse' },
       { kind: 'radio', from: 'sunil', lines: T.m9.sunilEnd },
       { kind: 'radio', from: 'mitra', lines: T.m9.mitraEnd },
     ],
@@ -219,12 +219,13 @@ export const MISSIONS: MissionDef[] = [
   },
   // ------------------------------------------------------------------ M10 Before Sunrise
   {
-    // Four parts in one mission. TODO_P6_CHECKPOINTS: a failure restarts the whole mission today.
+    // Four parts in one mission; a failure restarts the current part (checkpoints, decision 15).
     id: 'v2-sunrise', title: T.m10.title, clock: '5:20 AM', location: T.m10.location, sky: 'predawn', par: 480, brief: T.m10.brief,
     steps: [
       { kind: 'cutscene', id: 'C8' },
       { kind: 'radio', from: 'mitra', lines: T.m10.mitraStart },
       // (a) the firewall
+      { kind: 'checkpoint' },
       { kind: 'stealth', obj: T.m10.stealthObj, at: { point: 'Exam Section' }, label: T.m10.consoleLabel, model: 'panel', drones: 4 },
       {
         kind: 'puzzle', at: { point: 'Exam Section' }, label: T.m10.fw1Label, obj: T.m10.fw1Obj, model: 'breaker',
@@ -236,6 +237,7 @@ export const MISSIONS: MissionDef[] = [
         puzzle: { type: 'simon', title: T.m10.fw2Label, clue: T.m10.fw2Clue, length: 6 },
       },
       // (b) the core modules
+      { kind: 'checkpoint' },
       { kind: 'radio', from: 'asha', lines: T.m10.ashaModules },
       {
         kind: 'collect', obj: T.m10.modulesObj, verb: 'Take', time: 160, items: [
@@ -244,20 +246,25 @@ export const MISSIONS: MissionDef[] = [
           { label: T.m10.moduleC, model: 'module', at: { building: 'Machining Workshop' } },
         ],
       },
-      // (c) the chase. TODO_P6_MOTORBIKE: the target is a courier drone until Sunil's motorbike exists.
+      // (c) the chase: Sunil on his motorbike, round the ring road to the main gate.
+      { kind: 'checkpoint' },
       { kind: 'radio', from: 'asha', lines: T.m10.ashaBike },
-      { kind: 'chase', obj: T.m10.chaseObj, route: RING_TO_GATE, time: 120, speed: 11 },
+      { kind: 'chase', obj: T.m10.chaseObj, route: RING_TO_GATE.slice(0, -1), time: 120, speed: 12.5, bike: true },
       { kind: 'cutscene', id: 'C9' },
-      { kind: 'stub', todo: 'TODO_P6_GATE_SHUT_BAHADUR', note: 'MITRA shuts the main gate on Sunil; Bahadur Dai catches him.' },
+      { kind: 'talk', npc: 'bahadur', at: { xz: [165, -245.5] }, obj: T.m10.bahadurObj, lines: T.m10.bahadurGate },
       // (d) the reboot
+      { kind: 'checkpoint' },
       { kind: 'goto', at: { building: RIC }, label: T.m10.gotoLabel, obj: T.m10.gotoObj, time: 90 },
       { kind: 'talk', npc: 'asha', lines: T.m10.ashaRic },
       {
         kind: 'puzzle', at: { building: RIC }, label: T.m10.rebootLabel, obj: T.m10.rebootObj, model: 'module',
         puzzle: { type: 'simon', title: T.m10.rebootTitle, clue: T.m10.rebootClue, length: 6 },
       },
-      { kind: 'stub', todo: 'TODO_P6_FINAL_CHOICE', note: 'Should MITRA remember tonight or forget it? (Changes only its last line.)' },
-      { kind: 'radio', from: 'mitra', lines: T.m10.mitraRemember },
+      // The final choice changes only MITRA's last line.
+      {
+        kind: 'decide', key: 'mitraMemory', from: 'mitra', question: T.m10.choiceQuestion, options: T.m10.choiceOptions,
+        values: ['remember', 'forget'], lines: [T.m10.mitraRemember, T.m10.mitraForget],
+      },
     ],
     reward: { coins: 320, xp: 320, unlock: 'paint:gold', card: T.m10.card },
   },

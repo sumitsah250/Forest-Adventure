@@ -67,6 +67,14 @@ export class Person {
     this.oneWay = true;
   }
 
+  /** Walks `route` once at `speed` m/s, then stands at its end. */
+  walkOnce(route: RoutePt[], speed: number): void {
+    this.runTo(0, 0, speed);
+    this.route = route;
+  }
+
+  private look = new THREE.Vector3();
+
   place(x: number, z: number, facing: number): void {
     this.route = null;
     this.oneWay = false;
@@ -84,7 +92,7 @@ export class Person {
     let lookAt: THREE.Vector3 | null = null;
     if (!this.route && player && player.distanceToSquared(this.pos) < 7 * 7) {
       // Turn to face the player when they come close.
-      lookAt = new THREE.Vector3(player.x, player.y + 1.55, player.z);
+      lookAt = this.look.set(player.x, player.y + 1.55, player.z);
       const want = Math.atan2(player.x - this.pos.x, player.z - this.pos.z);
       this.facing += angleDiff(this.facing, want) * (1 - Math.exp(-3 * dt));
     } else if (!this.route) {

@@ -423,3 +423,112 @@ export class DoorCut {
     this.tip.set(this.obj.position.x, y + h, this.obj.position.z);
   }
 }
+
+/**
+ * Sunil's motorbike (mission 10): a low-poly bike with a helmeted rider in Sunil's colours
+ * (decision 20). The chase moves it with `place`; C9 calls `skid`, and `update` plays the slide
+ * and the fall. Nothing is allocated per frame.
+ */
+export class Motorbike {
+  readonly obj = new THREE.Group();
+  private body = new THREE.Group();
+  private wheels: THREE.Mesh[] = [];
+  private lastHeading = 0;
+  private lean = 0;
+  /** Skid: seconds in (-1: none), speed, spin direction. */
+  private skidT = -1;
+  private skidV = 0;
+  private skidDir = 1;
+  private heading = 0;
+
+  constructor() {
+    const m = (color: string, rough = 0.6, metal = 0.1, emissive?: string) =>
+      new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, ...(emissive ? { emissive, emissiveIntensity: 1.6 } : {}) });
+    const tyre = m('#141414', 0.9);
+    const chrome = m('#b9bec4', 0.3, 0.8);
+    const paint = m('#9e1b22', 0.35, 0.3);
+    const jacket = m('#3a4654', 0.8);
+    const trousers = m('#33373d', 0.85);
+    const helmet = m('#161a20', 0.25, 0.2);
+    const add = (g: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = this.body) => {
+      const mesh = new THREE.Mesh(g, mat);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    const wheelGeo = new THREE.TorusGeometry(0.3, 0.09, 8, 18).rotateY(Math.PI / 2);
+    const hubGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.1, 10).rotateZ(Math.PI / 2);
+    for (const z of [0.68, -0.62]) {
+      const w = add(wheelGeo, tyre, 0, 0.39, z);
+      add(hubGeo, chrome, 0, 0, 0, w);
+      this.wheels.push(w);
+    }
+    add(new THREE.BoxGeometry(0.22, 0.26, 0.9), paint, 0, 0.72, 0.05); // frame and engine block
+    add(new THREE.BoxGeometry(0.34, 0.24, 0.42), paint, 0, 0.95, 0.28); // tank
+    add(new THREE.BoxGeometry(0.3, 0.1, 0.55), m('#1b1b1b', 0.9), 0, 0.98, -0.2); // seat
+    add(new THREE.CylinderGeometry(0.035, 0.035, 0.6, 6).rotateX(-0.45), chrome, 0, 0.72, 0.6); // forks
+    add(new THREE.CylinderGeometry(0.025, 0.025, 0.7, 6).rotateZ(Math.PI / 2), chrome, 0, 1.12, 0.5); // handlebar
+    add(new THREE.CylinderGeometry(0.09, 0.07, 0.08, 10).rotateX(Math.PI / 2), m('#fff6d8', 0.2, 0, '#fff1c0'), 0, 0.98, 0.66); // headlight
+    add(new THREE.BoxGeometry(0.16, 0.06, 0.04), m('#ff2a2a', 0.4, 0, '#ff2020'), 0, 0.9, -0.5); // tail light
+    add(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 6).rotateX(Math.PI / 2), chrome, 0.16, 0.5, -0.3); // exhaust
+    // The rider, leaning into the bars.
+    const rider = new THREE.Group();
+    rider.position.set(0, 1.0, -0.12);
+    this.body.add(rider);
+    add(new THREE.BoxGeometry(0.4, 0.55, 0.26).translate(0, 0.27, 0), jacket, 0, 0.05, 0.08, rider).rotation.x = 0.55;
+    add(new THREE.SphereGeometry(0.17, 12, 10), helmet, 0, 0.62, 0.36, rider);
+    add(new THREE.BoxGeometry(0.22, 0.08, 0.06), m('#3fb4ff', 0.1, 0.5), 0, 0.62, 0.52, rider); // visor
+    for (const s of [-1, 1]) {
+      add(new THREE.BoxGeometry(0.09, 0.09, 0.5), jacket, s * 0.21, 0.36, 0.4, rider).rotation.x = 0.35; // arms
+      add(new THREE.BoxGeometry(0.13, 0.13, 0.5), trousers, s * 0.15, -0.02, 0.12, rider).rotation.x = -0.25; // thighs
+      add(new THREE.BoxGeometry(0.11, 0.42, 0.12), trousers, s * 0.17, -0.25, 0.36, rider); // shins
+    }
+    this.obj.add(this.body);
+    this.obj.visible = false;
+  }
+
+  /** Riding: at (x, y, z) heading `heading` (forward is +z), at `speed` m/s. */
+  place(x: number, y: number, z: number, heading: number, speed: number, dt: number): void {
+    this.obj.visible = true;
+    this.skidT = -1;
+    let turn = heading - this.lastHeading;
+    if (turn > Math.PI) turn -= Math.PI * 2;
+    if (turn < -Math.PI) turn += Math.PI * 2;
+    this.lastHeading = heading;
+    this.heading = heading;
+    const target = dt > 0 ? Math.max(-0.5, Math.min(0.5, (-turn / dt) * 0.35)) : 0;
+    this.lean += (target - this.lean) * Math.min(1, dt * 6);
+    this.obj.position.set(x, y, z);
+    this.obj.rotation.set(0, heading, 0);
+    this.body.rotation.set(0, 0, this.lean);
+    for (let i = 0; i < this.wheels.length; i += 1) this.wheels[i].rotation.x += (speed * dt) / 0.39;
+    this.skidV = speed;
+  }
+
+  /** C9: the back wheel steps out, the bike slides and goes down on its side. */
+  skid(dir = 1): void {
+    if (!this.obj.visible) return;
+    this.skidT = 0;
+    this.skidV = Math.max(this.skidV, 9);
+    this.skidDir = dir;
+  }
+
+  hide(): void {
+    this.obj.visible = false;
+    this.skidT = -1;
+  }
+
+  update(dt: number): void {
+    if (this.skidT < 0 || this.skidT > 3) return;
+    this.skidT += dt;
+    const f = Math.min(1, this.skidT / 1.3);
+    this.skidV = Math.max(0, this.skidV - 8 * dt);
+    this.obj.position.x += Math.sin(this.heading) * this.skidV * dt;
+    this.obj.position.z += Math.cos(this.heading) * this.skidV * dt;
+    this.obj.rotation.y = this.heading + this.skidDir * 1.25 * (1 - (1 - f) * (1 - f));
+    this.body.rotation.z = this.skidDir * 1.35 * f * f;
+    this.body.position.y = -0.18 * f * f;
+    for (let i = 0; i < this.wheels.length; i += 1) this.wheels[i].rotation.x += (this.skidV * dt) / 0.39;
+  }
+}

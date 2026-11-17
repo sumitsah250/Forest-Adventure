@@ -13,11 +13,11 @@ import { QUESTIONS, shuffled, type Question } from './questions.ts';
 import type { CampusUI, NavTarget } from './ui.ts';
 import type { CampusWorld } from './world.ts';
 import { Beacon, CheckRing, Drone, animateItem, coinModel, itemModel } from './actors.ts';
-import { choose, heartsLabel, runPuzzle } from './minigames.ts';
+import { choose, decide, heartsLabel, runPuzzle } from './minigames.ts';
 import { has, levelOf, saveProfile, starsFor, type Profile } from './profile.ts';
 import type { GoalEvent } from './meta.ts';
 import type { ClueBook } from './clues.ts';
-import { dressExtras } from './props.ts';
+import { dressExtras, type Motorbike } from './props.ts';
 import { QUIET_CLUES, STORY_VERSION, V2_TEXT } from './story.ts';
 
 const MAX_HEARTS = 3;
@@ -153,7 +153,16 @@ export interface MissionContext {
   lookCloser?: (p: Person, onFound: () => void) => () => void;
   /** A drone's alarm passed 60%: MITRA's spotted line and the alarm stinger (main rate-limits them). */
   spotted?: () => void;
+  /** Mission 9: the evidence board in accuse mode; resolves once the right person is named. */
+  accuse?: () => Promise<void>;
+  /** Sunil's motorbike (mission 10's chase; it stays where it stopped for C9). */
+  bike?: Motorbike;
+  /** A step starts (main opens the main gate for the bike chase). */
+  onStep?: (st: Step) => void;
 }
+
+/** A chase in progress: distance along the route, and where the target is now. */
+interface ChaseState { drone: Drone | null; route: Pt[]; lens: number[]; s: number; dir: number; started: boolean; x: number; z: number }
 
 export class Missions {
   private c: MissionContext;
@@ -178,7 +187,7 @@ export class Missions {
   private rings: CheckRing[] = [];
   private ringAt = 0;
   private patrols: Patrol[] = [];
-  private chase: { drone: Drone; route: Pt[]; lens: number[]; s: number; dir: number; started: boolean } | null = null;
+  private chase: ChaseState | null = null;
   private stepGroup = new THREE.Group();
   private focus = new THREE.Vector3();
   private near: { kind: 'npc'; npc: string } | { kind: 'item'; item: ItemObj } | { kind: 'device' } | null = null;
@@ -305,6 +314,7 @@ export class Missions {
     // People back to their posts, then any moves the earlier steps made (and anyone this
     // mission meets somewhere new is already waiting there).
     for (const [id, n] of this.npcs) this.placeNpc(id, n.home);
+    this.c.bike?.hide();
     const met = new Set<string>();
     d.steps.forEach((s, i) => {
       if (s.kind !== 'talk') return;
@@ -473,6 +483,7 @@ export class Missions {
     }
     this.saveCurrent();
     this.refreshHud();
+    this.c.onStep?.(st);
     if (this.locationPending && st.kind !== 'cutscene' && d.location) {
       this.locationPending = false;
       this.c.locationCard?.(d.clock, d.location);
@@ -505,9 +516,30 @@ export class Missions {
         if (epoch === this.epoch) await this.advance();
         return;
       }
-      case 'board': {
+      case 'board':
+      case 'accuse': {
         this.busy = true;
-        await this.c.board?.();
+        await (st.kind === 'accuse' ? this.c.accuse?.() : this.c.board?.());
+        this.busy = false;
+        if (st.kind === 'accuse') {
+          this.earned += 60;
+          this.c.moment?.('found');
+        }
+        if (epoch === this.epoch) await this.advance();
+        return;
+      }
+      case 'checkpoint':
+        if (epoch === this.epoch) await this.advance();
+        return;
+      case 'decide': {
+        // No wrong answer: the choice is saved, and the speaker answers with the matching lines.
+        this.busy = true;
+        const v = VOICES[st.from] ?? { name: st.from, role: '' };
+        const i = await decide(this.c.ui, { title: v.name, question: st.question, options: st.options });
+        this.c.profile.choices[st.key] = st.values[i];
+        saveProfile(this.c.profile);
+        this.c.sound('radioBeep');
+        await this.c.ui.dialog(v.name, v.role, st.lines[i], st.from);
         this.busy = false;
         if (epoch === this.epoch) await this.advance();
         return;
@@ -622,12 +654,16 @@ export class Missions {
       }
       case 'chase': {
         this.timer = st.time;
-        const drone = new Drone(2, false);
-        drone.height = 3.2;
-        this.stepGroup.add(drone.obj);
+        // The target: a courier drone, or Sunil's motorbike (owned by main, so it outlives the step).
+        let drone: Drone | null = null;
+        if (!st.bike || !this.c.bike) {
+          drone = new Drone(2, false);
+          drone.height = 3.2;
+          this.stepGroup.add(drone.obj);
+        }
         const lens = [0];
         for (let i = 1; i < st.route.length; i += 1) lens.push(lens[i - 1] + Math.hypot(st.route[i][0] - st.route[i - 1][0], st.route[i][1] - st.route[i - 1][1]));
-        this.chase = { drone, route: st.route, lens, s: 0, dir: 1, started: false };
+        this.chase = { drone, route: st.route, lens, s: 0, dir: 1, started: false, x: st.route[0][0], z: st.route[0][1] };
         break;
       }
       case 'riddle': {
@@ -766,9 +802,17 @@ export class Missions {
     if (STORY_VERSION === 2) this.c.profile.minutes = Math.max(0, this.c.profile.minutes - 3);
     this.busy = true;
     this.clearStep();
-    await this.c.ui.message('Mission failed', 'You ran out of hearts. Every mission can be retried — the puzzles and questions change each time.', 'Retry mission', 'bad');
+    const from = this.lastCheckpoint();
+    await this.c.ui.message('Mission failed', 'You ran out of hearts. Every mission can be retried — the puzzles and questions change each time.', from > 0 ? V2_TEXT.clueUi.retryPart : 'Retry mission', 'bad');
     this.busy = false;
-    await this.begin(this.index, 0, this.replay);
+    await this.begin(this.index, from, this.replay);
+  }
+
+  /** The last checkpoint step at or before the current step (0: the start). Decision 15. */
+  private lastCheckpoint(): number {
+    const steps = this.def?.steps ?? [];
+    for (let i = Math.min(this.step, steps.length - 1); i > 0; i -= 1) if (steps[i].kind === 'checkpoint') return i;
+    return 0;
   }
 
   /** Par time; mission 10's tightens by 20% once the sunrise clock has no minutes to spare. */
@@ -906,7 +950,8 @@ export class Missions {
         ui.setObjective(st.obj + kart, `Rings ${this.ringAt} / ${this.rings.length}`);
         break;
       case 'chase':
-        ui.setObjective(st.obj + kart, this.chase?.started ? 'Get right up to it!' : 'It is waiting — get close in Kalki');
+        if (st.bike) ui.setObjective(st.obj + kart, this.chase?.started ? V2_TEXT.m10.chaseSub : V2_TEXT.m10.chaseWait);
+        else ui.setObjective(st.obj + kart, this.chase?.started ? 'Get right up to it!' : 'It is waiting — get close in Kalki');
         break;
       case 'kart':
         ui.setObjective(st.obj, 'Walk up to Kalki and press E');
@@ -926,6 +971,9 @@ export class Missions {
       case 'cutscene':
       case 'stub':
       case 'board':
+      case 'accuse':
+      case 'decide':
+      case 'checkpoint':
       case 'run':
         break;
     }
@@ -971,8 +1019,8 @@ export class Missions {
           return r ? { main: { x: r.x, z: r.z, label: `Ring ${this.ringAt + 1}` }, extra: this.rings.slice(this.ringAt + 1, this.ringAt + 3).map((q) => ({ x: q.x, z: q.z, label: '' })) } : { main: null, extra: [] };
         }
         if (st.kind === 'chase' && this.chase) {
-          const d = this.chase.drone.obj.position;
-          return { main: { x: d.x, z: d.z, label: 'Courier drone' }, extra: [] };
+          const ch = this.chase;
+          return { main: { x: ch.x, z: ch.z, label: st.bike ? V2_TEXT.m10.bikeLabel : 'Courier drone' }, extra: [] };
         }
         return { main: null, extra: [] };
       }
@@ -987,6 +1035,9 @@ export class Missions {
       case 'cutscene':
       case 'stub':
       case 'board':
+      case 'accuse':
+      case 'decide':
+      case 'checkpoint':
       case 'run':
         return { main: null, extra: [] };
     }
@@ -1267,6 +1318,9 @@ export class Missions {
         case 'cutscene':
         case 'stub':
         case 'board':
+        case 'accuse':
+        case 'decide':
+        case 'checkpoint':
         case 'run':
           break;
       }
@@ -1382,7 +1436,12 @@ export class Missions {
     const ch = this.chase;
     const st = this.stepDef;
     if (!ch || !st || st.kind !== 'chase') return false;
+    const bike = st.bike ? this.c.bike : undefined;
+    if (bike) return this.updateBike(dt, ch, st, bike, focus, inKart);
+    const drone = ch.drone!;
     const pos = this.routeAt(ch.route, ch.lens, ch.s);
+    ch.x = pos.x;
+    ch.z = pos.z;
     const d = Math.hypot(focus.x - pos.x, focus.z - pos.z);
     if (!ch.started && inKart && d < 45) {
       ch.started = true;
@@ -1399,12 +1458,48 @@ export class Missions {
     }
     const ahead = this.routeAt(ch.route, ch.lens, ch.s + ch.dir * 2);
     const gy = this.c.ground.heightAt(pos.x, pos.z);
-    ch.drone.place(pos.x, pos.z, gy, Math.atan2(ahead.x - pos.x, ahead.z - pos.z), t);
+    drone.place(pos.x, pos.z, gy, Math.atan2(ahead.x - pos.x, ahead.z - pos.z), t);
     if (ch.started && d < 4.2) {
       this.c.ui.toast('Caught it! ✓', 'good');
       this.c.moment?.('caught');
       this.earned += 40;
       this.c.reward?.(this.at(pos.x, pos.z, 2.5), 'big', 40);
+      void this.advance();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Sunil's motorbike: never caught, never more than 60 m ahead (it waits), quicker when Kalki is
+   * right behind. The step ends when it reaches the end of the route, by the main gate.
+   */
+  private updateBike(dt: number, ch: ChaseState, st: Extract<Step, { kind: 'chase' }>, bike: Motorbike, focus: THREE.Vector3, inKart: boolean): boolean {
+    const d = Math.hypot(focus.x - ch.x, focus.z - ch.z);
+    if (!ch.started && inKart && d < 45) {
+      ch.started = true;
+      this.c.sound('bikeRev');
+      this.c.ui.toast(V2_TEXT.m10.chaseGo, 'bad');
+      this.refreshHud();
+    }
+    const k = !ch.started ? 0 : d > 60 ? 0 : d > 40 ? 0.6 : d < 12 ? 1.3 : 1;
+    const speed = st.speed * k;
+    ch.s += speed * dt;
+    const total = ch.lens[ch.lens.length - 1];
+    const route = ch.route;
+    const lens = ch.lens;
+    // Position and heading along the route, without allocating.
+    const u = Math.min(ch.s, total);
+    let i = 1;
+    while (i < lens.length - 1 && lens[i] < u) i += 1;
+    const f = (u - lens[i - 1]) / Math.max(1e-6, lens[i] - lens[i - 1]);
+    const ax = route[i - 1][0];
+    const az = route[i - 1][1];
+    ch.x = ax + (route[i][0] - ax) * f;
+    ch.z = az + (route[i][1] - az) * f;
+    const heading = Math.atan2(route[i][0] - ax, route[i][1] - az);
+    bike.place(ch.x, this.c.ground.heightAt(ch.x, ch.z), ch.z, heading, speed, dt);
+    if (ch.s >= total) {
       void this.advance();
       return true;
     }

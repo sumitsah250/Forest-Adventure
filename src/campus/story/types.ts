@@ -39,12 +39,7 @@ export type CutsceneId = 'C1' | 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'C7' | 'C8' |
  * Pieces of V2 that are not built yet. Each name is searchable in the code and says which
  * phase builds it. A `stub` step with one of these is skipped by the runner with a log line.
  */
-export type TodoId =
-  | 'TODO_P6_EVIDENCE_BOARD_ACCUSE' // M9: the accusation on the board (a plain choice until then)
-  | 'TODO_P6_MOTORBIKE' // M10: Sunil on his motorbike (the chase target is a drone until then)
-  | 'TODO_P6_GATE_SHUT_BAHADUR' // M10: MITRA shuts the gate, Bahadur Dai catches Sunil
-  | 'TODO_P6_FINAL_CHOICE' // M10: should MITRA remember or forget tonight
-  | 'TODO_P6_CHECKPOINTS'; // M10: restart from the current part, not the whole mission
+export type TodoId = `TODO_${string}`;
 
 export interface ItemDef {
   label: string;
@@ -94,7 +89,12 @@ export type Step =
   | { kind: 'puzzle'; at: Where; label: string; obj: string; model: ItemModel; puzzle: PuzzleDef; time?: number; cutDoor?: Where }
   /** pursuer: a MITRA drone hunts Kalki; let it sit on you and you lose a heart. */
   | { kind: 'drive'; obj: string; route: Pt[]; time: number; pursuer?: boolean }
-  | { kind: 'chase'; obj: string; route: Pt[]; time: number; speed: number }
+  /**
+   * bike: the target is Sunil's motorbike (mission 10). It is never caught: it stays at most 60 m
+   * ahead, and the step ends when it reaches the end of the route (the main gate, then C9).
+   * The main gate opens when a bike chase starts.
+   */
+  | { kind: 'chase'; obj: string; route: Pt[]; time: number; speed: number; bike?: boolean }
   /** auto: reaching the target completes it (no pick-up). */
   | { kind: 'stealth'; obj: string; at: Where; label: string; model: ItemModel; drones: number; auto?: boolean }
   | { kind: 'choose'; npc: string; question: string; options: string[]; answer: number; why: string }
@@ -104,6 +104,18 @@ export type Step =
   | { kind: 'cutscene'; id: CutsceneId }
   /** The evidence board opens (read-only until mission 9). */
   | { kind: 'board' }
+  /**
+   * Mission 9: the evidence board in accuse mode (ACCUSATION in clues.ts). A wrong suspect costs
+   * 15 minutes and lights up the cards that clear them; the right one plays C7 on the board.
+   */
+  | { kind: 'accuse' }
+  /**
+   * A choice with no wrong answer: the player picks an option, it is saved under `key`, and
+   * `from` says the matching lines on the radio.
+   */
+  | { kind: 'decide'; key: 'mitraMemory'; from: string; question: string; options: string[]; values: string[]; lines: string[][] }
+  /** A failure after this point restarts the mission here, not at the start (decision 15). */
+  | { kind: 'checkpoint' }
   /** A character runs to a place along a scripted path (and stays there). */
   | { kind: 'run'; npc: string; to: Where; clue?: ClueId }
   /** Hold E (or the use button) at a device for `seconds`. */
@@ -180,7 +192,7 @@ export interface ClueDef {
 export type Vec3 = [number, number, number];
 
 /** Things a camera can be placed around or pointed at. `npc:<id>` is a character from the cast. */
-export type EntityRef = 'player' | 'kart' | 'gate' | `npc:${string}`;
+export type EntityRef = 'player' | 'kart' | 'gate' | 'bike' | `npc:${string}`;
 
 /**
  * A point in the world for the camera, always relative to something that already exists:

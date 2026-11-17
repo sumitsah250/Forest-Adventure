@@ -53,6 +53,8 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''):
 };
 
 /** Opens the board. Resolves when it is closed (view) or the right accusation is made (accuse). */
+const TEST = new URLSearchParams(location.search).has('test');
+
 export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
   return new Promise((resolve) => {
     const t = o.text;
@@ -124,7 +126,10 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
       msg.textContent = t.accusePick;
       go.disabled = true;
       go.onclick = () => check();
-      box.append(qs, msg, go);
+      // The questions stay in view at the bottom while the cards scroll (small screens).
+      const foot = el('div', 'cq-board__foot');
+      foot.append(qs, msg, go);
+      box.append(foot);
     } else {
       const close = el('button', 'cq-btn cq-btn--primary', t.boardClose);
       close.onclick = () => done();
@@ -247,9 +252,19 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
     const done = () => {
       if (closed) return;
       closed = true;
+      if (TEST) delete (window as unknown as { __boardSolve?: () => void }).__boardSolve;
       host.close();
       resolve();
     };
+    // Browser tests (?test): accuse the culprit with the first accepted card for each question.
+    if (TEST && accuse) {
+      (window as unknown as { __boardSolve?: () => void }).__boardSolve = () => {
+        picked = o.culprit ?? null;
+        (o.questions ?? []).forEach((q, i) => (slots[i] = q.accepts.find((id) => o.state(id)) ?? null));
+        refresh();
+        check();
+      };
+    }
     host.keyHandler = (e) => {
       if (!accuse && (e.code === 'Escape' || e.code === 'KeyB')) done();
       // Accuse: Tab moves between suspects, cards and questions; Enter or Space presses (buttons do that already).

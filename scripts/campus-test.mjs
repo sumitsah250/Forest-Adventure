@@ -118,7 +118,7 @@ try {
           return { ui: 'cutscene' };
         }
         if (q('.cq-complete')) return { ui: 'complete' };
-        if (q('.cq-board')) return { ui: 'board' };
+        if (q('.cq-board')) return { ui: q('.cq-board.accuse') ? (q('.cq-board.solved') ? 'cine' : 'accuse') : 'board' };
         if (q('.cq-ending')) return { ui: 'ending' };
         const card = q('.cq-quiz');
         if (card) {
@@ -135,6 +135,13 @@ try {
       lastKey = key;
       if (same > 60) throw new Error(`stuck at ${key}`);
       if (s.ui === 'board') await page.click('.cq-board > .cq-btn');
+      else if (s.ui === 'accuse') {
+        await shot('accuse');
+        await page.evaluate(() => window.__boardSolve?.());
+        await wait(1800);
+        await shot('accuse-solved');
+        await wait(4000);
+      }
       else if (s.ui === 'none' && s.kind === 'hold' && s.target) {
         // Hold-to-pull: stand at the device and hold E.
         await page.evaluate(([x, z]) => {
