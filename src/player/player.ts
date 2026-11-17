@@ -99,6 +99,14 @@ export class Player {
   baseFov = 68;
   /** Half-size of the square the player may walk in (metres from the map centre). */
   bounds = 286;
+  /** Default pace and Shift pace (m/s). Games can retune them (Campus Quest walks and runs at natural human speeds). */
+  walkSpeed = JOG;
+  runSpeed = SPRINT;
+  /** Acceleration toward the wanted speed (1/s) when moving and when stopping, and the body's turn rate. */
+  accelMove = 8.5;
+  accelStop = 10;
+  turnWalk = 10;
+  turnRun = 7;
   private eyeY = 0;
 
   constructor(physics: PhysicsWorld, terrain: TerrainData, x: number, z: number, yaw: number) {
@@ -205,7 +213,7 @@ export class Player {
     this.inWater = water ? Math.max(0, water.level - this.position.y) : 0;
     const wade = this.inWater > 0.05 ? THREE.MathUtils.clamp(1 - this.inWater * 0.65, 0.35, 1) : 1;
 
-    let target = crouching ? CROUCH : this.aim > 0.3 ? AIM_WALK : this.sprinting ? SPRINT : JOG;
+    let target = crouching ? CROUCH : this.aim > 0.3 ? AIM_WALK : this.sprinting ? this.runSpeed : this.walkSpeed;
     target *= wade * this.speedScale;
     const ax = len > 1 ? axes.x / len : axes.x;
     const ay = len > 1 ? axes.y / len : axes.y;
@@ -214,7 +222,7 @@ export class Player {
     // Camera-relative: forward is -Z rotated by the view yaw.
     const wishX = (-sin * ay + cos * ax) * target;
     const wishZ = (-cos * ay - sin * ax) * target;
-    const accel = this.grounded ? (len > 0.01 ? 8.5 : 10) : 1.6;
+    const accel = this.grounded ? (len > 0.01 ? this.accelMove : this.accelStop) : 1.6;
     this.hVel.x = THREE.MathUtils.damp(this.hVel.x, wishX, accel, dt);
     this.hVel.y = THREE.MathUtils.damp(this.hVel.y, wishZ, accel, dt);
 
@@ -222,7 +230,7 @@ export class Player {
     let want = this.facing;
     if (this.strafe) want = this.yaw;
     else if (len > 0.1) want = Math.atan2(-wishX, -wishZ);
-    const turnRate = this.strafe ? 18 : this.sprinting ? 7 : 10;
+    const turnRate = this.strafe ? 18 : this.sprinting ? this.turnRun : this.turnWalk;
     const d = angleDelta(this.facing, want);
     this.facing += d * (1 - Math.exp(-turnRate * dt));
 
@@ -317,6 +325,29 @@ export class Player {
       vy: this.vVel,
       active: !this.animator.handsActive && this.crouchT < 0.15 && !this.firstPerson,
     });
+  }
+
+  /**
+   * Seated in an open vehicle (a go-kart): the character stays visible, sits with the
+   * pelvis on `seat` (world) and follows the vehicle's full orientation `quat` (+Z forward).
+   * `hands` are wrist targets in character space (null: hands rest in the lap).
+   */
+  animateSeated(dt: number, seat: THREE.Vector3, quat: THREE.Quaternion, hands: HandTargets | null, sitFeet?: { y: number; z: number }): void {
+    if (!this.character || !this.animator) return;
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+    const facing = Math.atan2(fwd.x, fwd.z);
+    // The sit pose puts the pelvis 0.53 m above the character origin.
+    const origin = new THREE.Vector3(0, -0.53, 0).applyQuaternion(quat).add(seat);
+    this.animator.update(Math.max(dt, 1e-3), {
+      pos: origin, vel: new THREE.Vector3(), facing, grounded: true, crouch: 0, sprint: false,
+      aimPitch: 0, aimAmount: 0, lookAt: null, hands, pose: 'sit', flinch: 0, sitFeet,
+    });
+    this.clips?.update(dt, { speed: 0, grounded: true, vy: 0, active: false });
+    const root = this.character.root;
+    root.position.copy(origin);
+    root.quaternion.copy(quat);
+    root.visible = true;
+    root.updateMatrixWorld(true);
   }
 
   /** Writes the camera transform for the active player view. */

@@ -1,5 +1,6 @@
-// Campus Quest entry point: renderer, physics, the campus world, the player, people,
-// quest and interface, and the frame loop.
+// Campus Quest entry point: renderer, physics, the campus world, the player and Kalki the
+// go-kart, people, the "Blackout at WRC" missions and side activities, the interface, the
+// sky through the night, and the frame loop.
 
 import '../style.css';
 import './campus.css';
@@ -7,8 +8,8 @@ import * as THREE from 'three';
 import { Input } from '../core/input.ts';
 import { PRESETS, loadSettings, qualityOverride } from '../core/settings.ts';
 import { installGrade } from '../render/grade.ts';
-import { PhysicsWorld, initRapier } from '../physics/physics.ts';
-import { Atmosphere } from '../render/atmosphere.ts';
+import { GROUP, PhysicsWorld, groups, initRapier } from '../physics/physics.ts';
+import { Atmosphere, type AtmosphereState } from '../render/atmosphere.ts';
 import { loadPbr, setMaxAnisotropy } from '../render/textures.ts';
 import { buildFoliageAtlas } from '../render/foliageAtlas.ts';
 import { windUniforms } from '../render/foliageMaterial.ts';
@@ -16,14 +17,29 @@ import { Player } from '../player/player.ts';
 import { AudioEngine } from '../audio/audio.ts';
 import { TouchControls } from '../ui/touch.ts';
 import type { TerrainData } from '../world/terrain.ts';
-import { DATA, GATE, WORLD_HALF, centroid } from './geo.ts';
+import { DATA, GATE, WORLD_HALF, centroid, pointInPoly } from './geo.ts';
 import { CampusGround } from './ground.ts';
 import { buildCampus } from './world.ts';
 import { populate, type Person } from './people.ts';
 import { PLAYER_SUIT } from '../character/humanoid.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
-import { CampusUI } from './ui.ts';
-import { Quest, clearSave, loadSave } from './quest.ts';
+import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
+import { Missions, type MissionResult } from './missions.ts';
+import { Extras } from './extras.ts';
+import { CUTSCENES, FEST_BANNER, KART_HOME, MISSIONS, NPCS, STORY_VERSION, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky } from './story.ts';
+import { Cutscenes } from './cutscene.ts';
+import { Subtitles } from './dialogue.ts';
+import { Portraits } from './portraits.ts';
+import { DroneEyes, Tarp, festBanner } from './props.ts';
+import { CheckRing, Drone, coinModel, itemModel, shardModel } from './actors.ts';
+import { Cinema, type Shot } from './cinema.ts';
+import { Fireflies, Lightning, Rain, Sparks } from './fx.ts';
+import { CampusSound } from './soundscape.ts';
+import { buildHumps } from './ramps.ts';
+import { WheelSpray } from '../vehicles/spray.ts';
+import { Kalki, MAX_UPGRADE, PAINTS, UPGRADE_COST } from './kart.ts';
+import { claimDaily, has, levelOf, loadProfile, resetStory, saveProfile, titleFor } from './profile.ts';
+import { badgeViews, checkBadges, goalViews, refreshGoals, starsTotal, trackGoal, type GoalEvent } from './meta.ts';
 import { createLoadingScreen } from '../ui/loadingScreen.ts';
 import { initPwa } from '../pwa.ts';
 
@@ -37,6 +53,18 @@ const uiRoot = document.getElementById('ui') as HTMLDivElement;
 const loading = createLoadingScreen(uiRoot, 'campus');
 const progress = (f: number, text: string) => loading.set(f, text);
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+const C = (h: string) => new THREE.Color(h);
+/** The title screen: a clear Pokhara afternoon (less haze than the forest, so the Himalaya shows). */
+const AFTERNOON: AtmosphereState = { zenith: C('#3c78c2'), horizon: C('#c9d6de'), fog: C('#b4c3cc'), sunColor: C('#ffd29a'), sunIntensity: 3.8, envIntensity: 0.8, fogDensity: 0.0011, fogFalloff: 0.02, cover: 0.28, exposure: 1 };
+/** The story's skies: the sun going down at 7 PM, a moonlit monsoon night, sunrise over Machhapuchhre. */
+const SKIES: Record<Sky, AtmosphereState> = {
+  dusk: { zenith: C('#33507e'), horizon: C('#e2a274'), fog: C('#a08c84'), sunColor: C('#ffa862'), sunIntensity: 2.5, envIntensity: 0.6, fogDensity: 0.0013, fogFalloff: 0.02, cover: 0.42, exposure: 1.05 },
+  night: { zenith: C('#0d1733'), horizon: C('#34466c'), fog: C('#243049'), sunColor: C('#a9c2ff'), sunIntensity: 1.15, envIntensity: 0.42, fogDensity: 0.0016, fogFalloff: 0.02, cover: 0.5, exposure: 1.25 },
+  // Clear and still dark, with first light low in the east (V2 mission 10, 5:20 AM).
+  predawn: { zenith: C('#101c40'), horizon: C('#5a6490'), fog: C('#2c3654'), sunColor: C('#b4c4ff'), sunIntensity: 1.35, envIntensity: 0.5, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.14, exposure: 1.22 },
+  dawn: { zenith: C('#4a6fae'), horizon: C('#f6c08e'), fog: C('#c9b4a6'), sunColor: C('#ffc28a'), sunIntensity: 3.1, envIntensity: 0.72, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.3, exposure: 1.05 },
+};
 
 async function boot(): Promise<void> {
   const settings = loadSettings();
@@ -83,17 +111,16 @@ async function boot(): Promise<void> {
   const ground = new CampusGround();
   const physics = new PhysicsWorld(R, ground as unknown as TerrainData);
 
-  // A clear Pokhara afternoon: less haze than the forest valley, so the Himalaya shows.
   const atmosphere = new Atmosphere(scene);
-  const s = atmosphere.state;
-  s.zenith.set('#3c78c2');
-  s.horizon.set('#c9d6de');
-  s.fog.set('#b4c3cc');
-  s.fogDensity = 0.0011;
-  s.fogFalloff = 0.02;
-  s.cover = 0.28;
-  s.sunIntensity = 3.8;
-  s.envIntensity = 0.8;
+  const copySky = (s: AtmosphereState) => {
+    const a = atmosphere.state;
+    a.zenith.copy(s.zenith);
+    a.horizon.copy(s.horizon);
+    a.fog.copy(s.fog);
+    a.sunColor.copy(s.sunColor);
+    Object.assign(a, { sunIntensity: s.sunIntensity, envIntensity: s.envIntensity, fogDensity: s.fogDensity, fogFalloff: s.fogFalloff, cover: s.cover, exposure: s.exposure });
+  };
+  copySky(AFTERNOON);
   atmosphere.apply(scene);
   atmosphere.configureShadows(preset.shadowMapSize, preset.shadowRange, preset.shadows);
 
@@ -109,7 +136,7 @@ async function boot(): Promise<void> {
   atmosphere.buildEnvironment(renderer, scene);
   atmosphere.apply(scene);
 
-  // The player starts outside the main gate on Lamachaur Marg, facing into campus.
+  // The player starts outside the main gate on Lamachaur Marg, facing into campus (title camera aside).
   const [ccx, ccz] = centroid(DATA.boundary);
   const ox = GATE[0] - ccx;
   const oz = GATE[1] - ccz;
@@ -122,12 +149,33 @@ async function boot(): Promise<void> {
   player.sensitivity = settings.mouseSensitivity;
   player.invertY = settings.invertY;
   player.baseFov = settings.fov;
-  // The player's own model (public/assets/models/player/me.glb); the built-in suit is the fallback.
+  // Natural human pace: a brisk walk, and a real run on Shift (Kalki covers the long distances).
+  player.walkSpeed = 1.9;
+  player.runSpeed = 5.8;
+  player.accelMove = 6.5;
+  player.accelStop = 9;
+  player.turnWalk = 8.5;
+  player.turnRun = 6.5;
+  // The player's own model (public/assets/models/player/sumit_character.glb); the built-in suit is the fallback.
   await playerModel;
   player.attachCharacter(scene, PLAYER_SUIT);
   physics.step();
 
-  progress(0.92, 'Students arriving for class');
+  progress(0.9, 'Fuelling Kalki');
+  const profile = loadProfile();
+  const kart = new Kalki(physics, ground as unknown as TerrainData, KART_HOME.x, KART_HOME.z, KART_HOME.heading, preset.headlightShadows);
+  scene.add(kart.root);
+  kart.setUpgrades(profile.upgrades);
+  kart.setPaint(profile.paint);
+  kart.boostUnlocked = has(profile, 'boost');
+  for (let i = 0; i < 40; i += 1) {
+    kart.fixedUpdate(FIXED_DT);
+    physics.step();
+  }
+  kart.postPhysics();
+  kart.update(0, 1, 0);
+
+  progress(0.93, 'Students arriving for class');
   await frame();
   // Each passer-by is a dozen draw calls; phones get a smaller crowd.
   const people: Person[] = populate(scene, ground, physics, preset.vegetationDensity * (touchDevice ? 0.6 : 1));
@@ -136,23 +184,440 @@ async function boot(): Promise<void> {
   player.onStep = (e) => audio.footstep(e.surface, e.intensity, player.renderPos);
   player.onLand = (e) => audio.footstep(e.surface, e.intensity, player.renderPos);
   const ui = new CampusUI(uiRoot, world.mapCanvas);
-  ui.onSound = (n) => audio.play(n);
+  const sound = new CampusSound(audio);
+  ui.onSound = (n, g) => audio.play(n, undefined, g ?? 1);
 
-  type State = 'title' | 'play' | 'pause' | 'map' | 'ending';
+  // ------------------------------------------------------------------ cinematics and effects
+  const cinema = new Cinema(uiRoot);
+  // Dialogue cards: portraits from the 3D characters, the player's name, MITRA's mood, the radio log.
+  const portraits = new Portraits(renderer);
+  ui.dialogue.portrait = (id) => portraits.get(id);
+  ui.dialogue.fill = (t) => t.replaceAll('{name}', profile.name || 'Student').replaceAll('{roll}', profile.roll || 'not on file');
+  ui.dialogue.mitraWarm = () => STORY_VERSION === 2 && profile.story >= 10;
+  ui.dialogue.log = (who, text) => {
+    profile.radioLog.push({ m: missions.def?.title ?? '', who, text });
+    if (profile.radioLog.length > 80) profile.radioLog.splice(0, profile.radioLog.length - 80);
+  };
+  const subs = new Subtitles(uiRoot, ui.dialogue, (id) => VOICES[id]?.name ?? NPCS.find((n) => n.id === id)?.name ?? id);
+  // Cutscene props (story 2): the fest banner on the gate, Kalki's tarp, the drones over the RIC.
+  const tarp = new Tarp();
+  const droneEyes = new DroneEyes();
+  scene.add(tarp.obj, droneEyes.group);
+  if (FEST_BANNER) scene.add(festBanner(world.gate, FEST_BANNER.title, FEST_BANNER.sub));
+  const rain = new Rain(touchDevice ? 700 : 1600);
+  const sparks = new Sparks(600);
+  const dust = new WheelSpray();
+  const lightning = new Lightning();
+  const fireflies = new Fireflies(touchDevice ? 60 : 110);
+  scene.add(rain.lines, sparks.points, dust.points, fireflies.points, buildHumps(ground, physics));
+  lightning.onThunder = () => audio.play('thunder');
+  /** Real seconds of slow motion left (big moments). */
+  let slow = 0;
+  const slowmo = (s: number) => (slow = Math.max(slow, s));
+  let fireworks = 0;
+  const fireworkAt = new THREE.Vector3();
+  const FIRE = ['#ff4a5a', '#ffd24a', '#38e1ff', '#7cff8a', '#ff7ae0', '#ffffff'].map((c) => new THREE.Color(c));
+  const startFireworks = (at: THREE.Vector3, seconds: number) => {
+    fireworkAt.copy(at);
+    fireworks = seconds;
+  };
+
+  // ------------------------------------------------------------------ reward moments
+  /** Real seconds of frozen time left (a hit-stop on big moments) and the camera punch (0..1). */
+  let freeze = 0;
+  let punch = 0;
+  const GOLD = new THREE.Color('#ffd24a');
+  const CYAN = new THREE.Color('#38e1ff');
+  const WHITE = new THREE.Color('#fff6dc');
+  const sv = new THREE.Vector3();
+  const sp = new THREE.Vector3();
+  /**
+   * Something good happened at `at`: sparks there, coins flying from it into the wallet,
+   * and for big moments a 70 ms freeze and a little camera punch.
+   */
+  const reward = (at: THREE.Vector3, kind: 'small' | 'medium' | 'big', coins: number) => {
+    const n = kind === 'big' ? 46 : kind === 'medium' ? 26 : 12;
+    for (let i = 0; i < n; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (kind === 'big' ? 3.5 : 2.2) * (0.5 + Math.random());
+      sv.set(Math.cos(a) * s, 2 + Math.random() * (kind === 'big' ? 5 : 3), Math.sin(a) * s);
+      sparks.emit(at, sv, i % 3 === 0 ? CYAN : i % 3 === 1 ? GOLD : WHITE, 0.45 + Math.random() * 0.4, 6);
+    }
+    if (kind === 'big') {
+      freeze = Math.max(freeze, 0.07);
+      punch = 1;
+    } else if (kind === 'medium') punch = Math.max(punch, 0.5);
+    if (coins > 0) {
+      sp.copy(at).project(camera);
+      const onScreen = sp.z < 1 && Math.abs(sp.x) < 1.1 && Math.abs(sp.y) < 1.1;
+      const x = onScreen ? ((sp.x + 1) / 2) * window.innerWidth : window.innerWidth / 2;
+      const y = onScreen ? ((1 - sp.y) / 2) * window.innerHeight : window.innerHeight * 0.55;
+      ui.coinFly(x, y, coins);
+    }
+  };
+
+  /** Daily goals and badges: count the event, announce what it completed, save. */
+  const announceBadges = () => {
+    for (const b of checkBadges(profile)) ui.achievement(b.icon, 'Badge unlocked', b.name);
+  };
+  const track = (e: GoalEvent, n = 1) => {
+    for (const msg of trackGoal(profile, e, n)) ui.achievement('🎯', 'Daily goal', msg.replace(/^Daily goal: /, ''));
+    announceBadges();
+    saveProfile(profile);
+  };
+
+  // ------------------------------------------------------------------ campus power
+  /** Share of campus with its power back: grows with the story, lights windows at night. */
+  const powerFor = () => powerLevel(profile.story);
+  let powerShown = powerFor();
+  let powerTo = powerShown;
+  /** How fast the power level moves to its target (per second), and a floor for window glow before full dark (cutscenes set both). */
+  let powerRate = 0.05;
+  let glowMin = 0;
+  let wet = 0;
+
+  /** Mission intro: a high establishing shot pushing in on the first objective, then a low sweep. */
+  const intro = async (d: MissionDef, index: number, at: { x: number; z: number } | null): Promise<void> => {
+    if (!at) {
+      ui.banner(`Mission ${index + 1} · ${d.title}`, `${d.clock} — ${d.brief}`);
+      audio.play('objective');
+      return;
+    }
+    const gy = ground.heightAt(at.x, at.z);
+    const p = focus();
+    let dx = p.x - at.x;
+    let dz = p.z - at.z;
+    const l = Math.hypot(dx, dz) || 1;
+    dx /= l;
+    dz /= l;
+    const target = new THREE.Vector3(at.x, gy + 1.6, at.z);
+    const V = (u: number, h: number, side = 0) => new THREE.Vector3(at.x + dx * u + dz * side, gy + h, at.z + dz * u - dx * side);
+    const replay = (profile.stars[d.id] ?? 0) > 0;
+    const shots: Shot[] = [];
+    if (!replay) shots.push({ from: V(110, 60, -30), to: V(55, 30, -12), look: target.clone().setY(gy - 4), lookTo: target, dur: 3.6, fov: 55 });
+    shots.push({ from: V(12, 3.2, 9), to: V(8, 2.2, -7), look: target, dur: replay ? 2.2 : 2.8, fov: 48 });
+    audio.play('sting');
+    window.setTimeout(() => audio.play('whoosh'), 250);
+    document.body.classList.add('cq-cinematic');
+    await cinema.play(shots, { kicker: `Mission ${index + 1} · ${d.clock}`, title: d.title, sub: d.brief }, settings.fov);
+    document.body.classList.remove('cq-cinematic');
+  };
+
+  /** Over-the-shoulder framing on the person the player is talking to. */
+  const converse = (p: Person | null) => {
+    if (!p) {
+      cinema.release();
+      return;
+    }
+    if (mode === 'kart') return;
+    const me = player.renderPos;
+    let dx = p.pos.x - me.x;
+    let dz = p.pos.z - me.z;
+    const l = Math.hypot(dx, dz) || 1;
+    dx /= l;
+    dz /= l;
+    player.facing = Math.atan2(-dx, -dz);
+    const head = me.y + 1.55;
+    const cam = new THREE.Vector3(me.x - dx * 1.35 + dz * 0.55, head + 0.12, me.z - dz * 1.35 - dx * 0.55);
+    cinema.talk(cam, new THREE.Vector3(p.pos.x, p.pos.y + 1.5, p.pos.z), camera);
+  };
+
+  type State = 'title' | 'play' | 'pause' | 'map' | 'menu';
   let state: State = 'title';
-  /** A game has been started this session (the title screen must not save an empty game). */
+  let mode: 'foot' | 'kart' = 'foot';
   let started = false;
-  const quest = new Quest({
-    scene, world, ground, physics, ui,
+
+  // ------------------------------------------------------------------ sky
+  let skyFrom: AtmosphereState = AFTERNOON;
+  let skyTo: AtmosphereState = AFTERNOON;
+  let skyT = 1;
+  let night = false;
+  const setSky = (to: AtmosphereState, instant = false) => {
+    if (to === skyTo && skyT >= 1) return;
+    skyFrom = {
+      ...atmosphere.state, zenith: atmosphere.state.zenith.clone(), horizon: atmosphere.state.horizon.clone(),
+      fog: atmosphere.state.fog.clone(), sunColor: atmosphere.state.sunColor.clone(),
+    };
+    skyTo = to;
+    skyT = instant ? 0.999 : 0;
+    night = to === SKIES.night || to === SKIES.predawn;
+  };
+
+  // ------------------------------------------------------------------ kart helpers
+  const inKart = () => mode === 'kart';
+  const focus = () => (mode === 'kart' ? kart.position : player.renderPos);
+  const enterKart = () => {
+    if (mode !== 'foot') return;
+    mode = 'kart';
+    kart.vehicle.enter(player);
+    kart.vehicle.setLights(night || skyTo === SKIES.dusk);
+    audio.play('thunk', kart.position);
+    window.setTimeout(() => audio.engineStart(kart.position, true), 300);
+  };
+  const exitKart = (): boolean => {
+    if (mode !== 'kart') return false;
+    if (!kart.vehicle.exit(player)) {
+      ui.toast('No room to get out here', 'bad');
+      return false;
+    }
+    kart.vehicle.phys.engineOn = false;
+    mode = 'foot';
+    audio.play('thunk', kart.position);
+    return true;
+  };
+  let summonCooldown = 0;
+  /**
+   * The nearest free spot for Kalki around the player: rings outward from 3.5 m to 18 m,
+   * trying the direction the player looks first. A spot must be outside buildings, near the
+   * player's level, not steep, and clear of anything solid (benches, fences, trees, walls,
+   * people) for the whole kart. Paved ground is preferred if it is about as close.
+   */
+  const kartShape = new physics.R.Cuboid(0.8, 0.42, 1.2);
+  const findKartSpot = (p: { x: number; y: number; z: number } = player.position, lineOfSight = true): { x: number; z: number; heading: number } | null => {
+    const look = player.yaw; // view forward is (-sin yaw, -cos yaw)
+    const heading = look + Math.PI; // kart forward (sin h, cos h) = view forward
+    const rot = { x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) };
+    const order = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8];
+    let fallback: { x: number; z: number; heading: number; d: number } | null = null;
+    for (const r of [3.5, 5, 7, 9.5, 12.5, 15.5, 18]) {
+      for (const k of order) {
+        const a = look + Math.PI + (k * Math.PI) / 8;
+        const x = p.x - Math.sin(a + Math.PI) * r;
+        const z = p.z - Math.cos(a + Math.PI) * r;
+        if (Math.abs(x) > WORLD_HALF - 16 || Math.abs(z) > WORLD_HALF - 16) continue;
+        const gy = ground.heightAt(x, z);
+        if (Math.abs(gy - p.y) > 1.6 || ground.slopeAt(x, z) > 0.3) continue;
+        if (DATA.buildings.some((b) => pointInPoly(x, z, b.pts))) continue;
+        let blocked = false;
+        physics.world.intersectionsWithShape(
+          { x, y: gy + 0.75, z }, rot, kartShape,
+          () => {
+            blocked = true;
+            return false;
+          },
+          undefined, groups(GROUP.VEHICLE, GROUP.STATIC | GROUP.DYNAMIC | GROUP.NPC), undefined, kart.vehicle.phys.body,
+        );
+        if (blocked) continue;
+        // Also a clear line from the player to the spot (not behind a wall or fence).
+        const dx = x - p.x;
+        const dz = z - p.z;
+        const len = Math.hypot(dx, dz);
+        const ray = new physics.R.Ray({ x: p.x, y: p.y + 0.8, z: p.z }, { x: dx / len, y: 0, z: dz / len });
+        if (lineOfSight && physics.world.castRay(ray, len, true, undefined, groups(0xffff, GROUP.STATIC))) continue;
+        const paved = ground.surfaceAt(x, z) === 'rock' || ground.surfaceAt(x, z) === 'gravel';
+        if (paved) return { x, z, heading };
+        if (!fallback) fallback = { x, z, heading, d: r };
+      }
+      // Grass close by beats a road far away.
+      if (fallback && r >= fallback.d + 4) break;
+    }
+    return fallback;
+  };
+  const summonKart = () => {
+    if (mode !== 'foot' || !missions.kartAllowed()) return;
+    if (summonCooldown > 0) {
+      ui.toast(`Kalki is still on the way… (${Math.ceil(summonCooldown)} s)`);
+      return;
+    }
+    if (kart.position.distanceTo(player.renderPos) < 6) {
+      ui.toast('Kalki is right here — press E to get in');
+      return;
+    }
+    let spot = findKartSpot();
+    let outside = false;
+    if (!spot) {
+      // Inside a building: Kalki waits outside its door.
+      const b = DATA.buildings.find((q) => pointInPoly(player.position.x, player.position.z, q.pts));
+      if (b) {
+        const e = world.entranceFor(b);
+        spot = findKartSpot({ x: e.x, y: ground.heightAt(e.x, e.z), z: e.z }, false);
+        outside = !!spot;
+      }
+    }
+    if (!spot) {
+      ui.toast('No free space for Kalki here — step somewhere more open', 'bad');
+      return;
+    }
+    kart.place(spot.x, spot.z, spot.heading, ground as unknown as TerrainData);
+    summonCooldown = 3;
+    // Arrival: a burst of sparks, a whoosh and the engine note.
+    const at = new THREE.Vector3(spot.x, ground.heightAt(spot.x, spot.z) + 0.4, spot.z);
+    for (let i = 0; i < 40; i += 1) sparks.emit(at, new THREE.Vector3((Math.random() - 0.5) * 6, 1 + Math.random() * 4, (Math.random() - 0.5) * 6), new THREE.Color(i % 2 ? '#38e1ff' : '#ffd24a'), 0.5 + Math.random() * 0.4);
+    audio.play('whoosh', at);
+    audio.play('keys', player.renderPos);
+    ui.toast(outside ? 'Kalki is waiting outside the door' : 'Kalki is here! Press E to get in', 'good');
+  };
+
+  ui.onCallKart = () => summonKart();
+
+  // ------------------------------------------------------------------ missions
+  const missions: Missions = new Missions({
+    scene, world, ground, physics, ui, profile,
     sound: (n) => audio.play(n),
-    onFinished: (stats) => {
-      state = 'ending';
-      input.exitPointerLock();
-      ui.showHud(false);
-      ui.ending(stats, () => void newGame(), () => toTitle());
+    inKart,
+    reposition: (x, z, lx, lz) => {
+      const yaw = Math.atan2(x - lx, z - lz);
+      if (mode === 'kart') kart.place(x, z, yaw + Math.PI, ground as unknown as TerrainData);
+      else player.teleport(x, ground.heightAt(x, z), z, yaw);
+    },
+    onSky: (sky) => setSky(SKIES[sky]),
+    onUnlock: (id) => {
+      if (id === 'boost') kart.boostUnlocked = true;
+      if (id.startsWith('paint:') && !profile.paints.includes(id.slice(6))) profile.paints.push(id.slice(6));
+      if (id === 'engine' || id === 'grip') {
+        profile.upgrades[id] = Math.min(MAX_UPGRADE, profile.upgrades[id] + 1);
+        kart.setUpgrades(profile.upgrades);
+      }
+      saveProfile(profile);
+      extras.refresh();
+    },
+    onComplete: (r) => afterMission(r),
+    cutscene: (id) => cutscenes.play(id, camera),
+    reward,
+    chime: (n) => audio.chime(n),
+    track,
+    intro,
+    converse,
+    placeKart: (x, z, heading) => kart.place(x, z, heading, ground as unknown as TerrainData),
+    moment: (kind) => {
+      slowmo(kind === 'caught' ? 1.1 : 0.7);
+      audio.play('whoosh');
+      if (kind === 'caught') ui.trick('GOTCHA!', 'drone caught');
     },
   });
-  people.push(...quest.people);
+
+  // Kalki stunts.
+  let lastDrift = 0;
+  kart.onDriftStart = () => audio.play('driftCharge');
+  kart.onTurbo = (level) => {
+    audio.play('boost');
+    missions.noteTurbo();
+    profile.stats.turbos += 1;
+    track('turbo');
+    const coins = missions.stunt(level * 5);
+    ui.trick(['', 'MINI-TURBO', 'SUPER TURBO', 'ULTRA TURBO'][level], `+${coins}◈`);
+    kart.vehicle.shake = Math.max(kart.vehicle.shake, 0.25);
+  };
+  kart.onLand = (air) => {
+    audio.play('air');
+    if (air > 0.35) {
+      profile.stats.jumps += 1;
+      track('jump');
+    }
+    const coins = missions.stunt(Math.round(air * 12));
+    ui.trick(`AIR ${air.toFixed(1)} s`, `+${coins}◈`);
+    kart.vehicle.shake = Math.max(kart.vehicle.shake, Math.min(0.8, air * 0.6));
+    if (air > 1) slowmo(0.4);
+  };
+  people.push(...missions.people);
+  const extras = new Extras({ scene, ground, ui, profile, sound: (n) => audio.play(n), onCoins: () => missions.refreshHud(), kart: kart.root, track, reward });
+
+  // ------------------------------------------------------------------ cutscenes
+  /** Scripted events a cutscene shot can fire by name (story/v2/cutscenes.ts lists them). */
+  const cutEvents: Record<string, (e: CutEvent, at: THREE.Vector3 | null) => void> = {
+    power: (e) => {
+      const v = e.value ?? 0;
+      powerRate = e.over ? Math.abs(v - powerShown) / e.over : Infinity;
+      powerTo = v;
+    },
+    glow: (e) => (glowMin = e.value ?? 0),
+    drones: (e, at) => droneEyes.show(e.value ?? 0, at),
+    tarp: (e) => (e.arg === 'on' ? tarp.cover(kart.position, kart.heading) : tarp.pull()),
+    headlights: (e) => kart.vehicle.setLights(!!e.value),
+  };
+  const cutscenes = new Cutscenes(CUTSCENES, {
+    where: (w, out) => {
+      const s = missions.resolve(w, 'cutscene');
+      out.set(s.x, ground.heightAt(s.x, s.z), s.z);
+      return s.facing;
+    },
+    // Each resolver is made once per shot; calling it writes into `out` and allocates nothing.
+    entity: (ref) => {
+      if (ref === 'player') return (out) => (out.copy(player.renderPos), player.facing + Math.PI);
+      if (ref === 'kart') return (out) => (out.copy(kart.position), kart.heading);
+      if (ref === 'gate') return (out) => (out.set(world.gate.x, world.gate.y, world.gate.z), world.gate.heading);
+      if (ref.startsWith('npc:')) {
+        const n = missions.npcSpot(ref.slice(4));
+        return n ? (out) => (out.copy(n.pos), n.facing()) : null;
+      }
+      return null;
+    },
+    sound: (n) => audio.play(n),
+    event: (e, at) => {
+      const run = cutEvents[e.do];
+      if (run) run(e, at);
+      else console.warn(`Campus Quest: unknown cutscene event "${e.do}"`);
+    },
+    subtitle: (who, text) => subs.show(who, text),
+    card: (c) => cinema.setCard(c ?? null),
+    letterbox: (on) => cinema.setBars(on),
+    begin: () => touch?.setVisible(false),
+    end: () => {
+      touch?.setVisible(state === 'play');
+      // Back to what the story says the lights should be.
+      powerTo = powerFor();
+      powerRate = 0.05;
+      glowMin = 0;
+      if (state === 'play' && !ui.modal) lockOrPrompt();
+    },
+    baseFov: () => settings.fov,
+  }, uiRoot);
+
+  const totalStars = () => `${starsTotal(profile)} / ${MISSIONS.length * 3}`;
+
+  const afterMission = async (r: MissionResult) => {
+    const lv = levelOf(profile.xp);
+    const last = r.index === MISSIONS.length - 1 && !r.replay;
+    const nextIndex = profile.story < MISSIONS.length ? profile.story : -1;
+    // Victory: slow orbit around the player, fireworks for three stars.
+    const f0 = focus();
+    cinema.orbit(new THREE.Vector3(f0.x, f0.y + 1.2, f0.z), camera, mode === 'kart' ? 5.5 : 4.2, 1.6);
+    if (r.stars >= 3 || last) startFireworks(new THREE.Vector3(f0.x, f0.y + 24, f0.z), last ? 30 : 6);
+    // Power back to another part of campus: the windows come on during the victory orbit.
+    const powerBefore = powerTo;
+    powerTo = powerFor();
+    if (powerTo > powerBefore + 1e-3) window.setTimeout(() => audio.play('power'), 500);
+    announceBadges();
+    saveProfile(profile);
+    const next = nextIndex >= 0 && !last ? MISSIONS[nextIndex] : null;
+    const choice = await ui.missionComplete({
+      title: r.mission.title, number: r.index + 1, stars: r.stars, prevStars: r.prevStars, seconds: r.seconds, par: r.mission.par,
+      heartsLeft: r.heartsLeft, coins: r.coins, xp: r.xp,
+      level: { before: r.levelBefore, after: r.levelAfter, frac: lv.into / lv.need, title: titleFor(lv.level) },
+      card: `${powerTo > powerBefore + 1e-3 ? `⚡ Campus power ${Math.round(powerTo * 100)}% · ` : ''}${r.perfect ? `PERFECT RUN +100◈ · ${r.mission.reward.card}` : r.mission.reward.card}`,
+      newUnlock: r.newUnlock, bestTime: r.bestTime,
+      nextLabel: last ? 'Finish the story' : nextIndex >= 0 ? `Next: ${MISSIONS[nextIndex].title}` : 'Keep exploring',
+      garage: missions.kartAllowed(),
+      bonus: r.bonus,
+      teaser: next ? `Mission ${nextIndex + 1} · ${next.clock} — ${next.title}: ${next.brief}` : null,
+      autoNext: next ? 10 : 0,
+    });
+    missions.refreshHud();
+    if (!last) cinema.release();
+    if (choice === 'garage') await new Promise<void>((res) => openGarage(res));
+    if (last) {
+      ui.ending(
+        { coins: profile.coins, stars: totalStars(), level: lv.level, title: titleFor(lv.level), seconds: profile.stats.seconds, accuracy: profile.stats.correct },
+        () => {
+          cinema.release();
+          missions.stop();
+          ui.close();
+          play();
+        },
+        () => {
+          cinema.release();
+          openMissions(() => toTitle());
+        },
+        () => {
+          cinema.release();
+          toTitle();
+        },
+      );
+      return;
+    }
+    if (nextIndex >= 0) await missions.begin(nextIndex);
+    else missions.stop();
+  };
 
   const touch = input.isTouch ? new TouchControls(uiRoot, input, (which) => (which === 'map' ? openMap() : openPause())) : null;
   touch?.setVisible(false);
@@ -179,49 +644,216 @@ async function boot(): Promise<void> {
     lockOrPrompt();
   };
 
-  const newGame = async () => {
-    clearSave();
-    await quest.begin(null);
-    player.teleport(startX, ground.heightAt(startX, startZ), startZ, startYaw);
-    void audio.start();
-    touch?.enterImmersive();
-    play();
-    ui.toast('Welcome to IOE Pashchimanchal Campus', 'good');
-  };
-  const continueGame = async () => {
-    const save = loadSave();
-    await quest.begin(save);
-    // Resume next to the current objective.
-    const t = quest.targets().main;
-    if (t) {
-      const x = t.x + 6;
-      const z = t.z + 6;
-      player.teleport(x, ground.heightAt(x, z), z, Math.atan2(x - t.x, z - t.z));
+  /** Stand the player near (x, z), facing it. */
+  const placeNear = (x: number, z: number, dist = 9) => {
+    const a = Math.random() * Math.PI * 2;
+    for (let k = 0; k < 8; k += 1) {
+      const px = x + Math.cos(a + k) * dist;
+      const pz = z + Math.sin(a + k) * dist;
+      if (DATA.buildings.some((b) => pointInPoly(px, pz, b.pts))) continue;
+      if (mode === 'kart') exitKart();
+      player.teleport(px, ground.heightAt(px, pz), pz, Math.atan2(px - x, pz - z));
+      return;
     }
+  };
+
+  const startMission = async (index: number, step = 0, replay = false) => {
     void audio.start();
     touch?.enterImmersive();
     play();
+    await missions.begin(index, step, replay);
+    const t = missions.targets(kart.position).main;
+    // Stealth steps: start outside the drones' patrol, not in it.
+    if (t) placeNear(t.x, t.z, missions.stepDef?.kind === 'stealth' ? 30 : 9);
   };
+
+  const newStory = async () => {
+    resetStory(profile);
+    saveProfile(profile);
+    powerShown = powerTo = powerFor();
+    tarp.clear();
+    // A story that opens on a cutscene starts under its own sky (no blend, and no light-map rebuild mid-shot).
+    if (MISSIONS[0].steps[0]?.kind === 'cutscene') setSky(SKIES[MISSIONS[0].sky], true);
+    // Wake up outside the RIC, where Asha is waiting.
+    const s = missions.resolve({ building: 'Research and Innovation Centre (RIC)' }, 'RIC');
+    const px = s.x + Math.sin(s.facing) * 7;
+    const pz = s.z + Math.cos(s.facing) * 7;
+    if (mode === 'kart') exitKart();
+    player.teleport(px, ground.heightAt(px, pz), pz, s.facing);
+    void audio.start();
+    touch?.enterImmersive();
+    play();
+    await missions.begin(0);
+  };
+
+  const continueStory = async () => {
+    if (profile.current) await startMission(profile.current.mission, profile.current.step);
+    else if (profile.story < MISSIONS.length) await startMission(profile.story);
+    else {
+      missions.stop();
+      setSky(SKIES.dawn);
+      void audio.start();
+      play();
+    }
+  };
+
+  const continueLabel = (): string | null => {
+    if (profile.current) return `Mission ${profile.current.mission + 1} · ${MISSIONS[profile.current.mission].title}`;
+    if (profile.story > 0 && profile.story < MISSIONS.length) return `Mission ${profile.story + 1} · ${MISSIONS[profile.story].title}`;
+    if (profile.story >= MISSIONS.length) return 'Free roam';
+    return null;
+  };
+
+  let dailyText: string | null = null;
+  const daily = claimDaily(profile);
+  refreshGoals(profile);
+  announceBadges();
+  if (daily) {
+    saveProfile(profile);
+    dailyText = `☕ Chiya streak: day ${daily.streak} — +${daily.coins}◈${daily.streak < 7 ? ` (day ${daily.streak + 1}: +${50 + Math.min(daily.streak, 6) * 25}◈)` : ''}`;
+  }
+
   const toTitle = () => {
-    if (started) quest.save();
+    if (started && missions.def) saveProfile(profile);
     state = 'title';
     ui.showHud(false);
     touch?.setVisible(false);
     input.exitPointerLock();
-    const save = loadSave();
-    ui.title({ canContinue: !!save, level: (save?.level ?? 0) + 1, onStart: () => void newGame(), onContinue: () => void continueGame() });
+    setSky(AFTERNOON);
+    const lv = levelOf(profile.xp);
+    const fresh = profile.story === 0 && !profile.current && profile.coins === 0;
+    ui.title({
+      continueLabel: continueLabel(),
+      onContinue: () => void continueStory(),
+      onNew: () => void newStory(),
+      onMissions: () => openMissions(() => toTitle()),
+      onGarage: missions.kartAllowed() ? () => openGarage(() => toTitle()) : null,
+      onProgress: () => openProgress(() => toTitle()),
+      profileLine: fresh ? '' : `Lv ${lv.level} · ${titleFor(lv.level)} · ◈ ${profile.coins.toLocaleString()} · ★ ${totalStars()}`,
+      daily: dailyText,
+      goals: goalViews(profile),
+      badges: `${profile.badges.length} / ${badgeViews(profile).length}`,
+    });
+    dailyText = null;
   };
+
+  const openProgress = (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    const clockText = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m` : `${Math.floor(s / 60)} m`);
+    const st = profile.stats;
+    ui.progress({
+      goals: goalViews(profile),
+      badges: badgeViews(profile),
+      stats: [
+        { label: 'missions run', value: String(st.missions) },
+        { label: 'played', value: clockText(st.seconds) },
+        { label: 'answers right', value: `${st.correct} / ${st.answered}` },
+        { label: 'mini-turbos', value: String(st.turbos) },
+        { label: 'best combo', value: `×${st.bestCombo}` },
+        { label: 'close calls', value: String(st.closeCalls) },
+        { label: 'time trial', value: profile.trialBest ? `${profile.trialBest.toFixed(1)} s` : '—' },
+        { label: 'memory shards', value: `${profile.shards.length} / ${extras.total}` },
+      ],
+    }, () => {
+      state = prev === 'menu' ? 'title' : prev;
+      onClose();
+    });
+  };
+
+  const openMissions = (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    const list: MissionCard[] = MISSIONS.map((m, i) => ({
+      number: i + 1, title: m.title, brief: m.brief, clock: m.clock, stars: profile.stars[m.id] ?? 0, best: profile.best[m.id] ?? null,
+      state: i < profile.story ? 'done' : i === profile.story ? 'next' : 'locked',
+    }));
+    ui.missions(list, {
+      totalStars: totalStars(),
+      onPick: (i) => void startMission(i, 0, i < profile.story),
+      onClose: () => {
+        state = prev === 'menu' ? 'title' : prev;
+        onClose();
+      },
+    });
+  };
+
+  const garageState = (): GarageState => ({
+    coins: profile.coins,
+    upgrades: (['engine', 'grip', 'boost'] as const).map((key) => {
+      const level = profile.upgrades[key];
+      return {
+        key, level, max: MAX_UPGRADE,
+        name: key === 'engine' ? 'Engine — top speed and pull' : key === 'grip' ? 'Tyres — grip in corners' : 'Boost — longer boost',
+        cost: level >= MAX_UPGRADE ? null : UPGRADE_COST[level],
+        locked: key === 'boost' && !has(profile, 'boost') ? 'Unlocks in Mission 3' : null,
+      };
+    }),
+    paints: Object.entries(PAINTS).map(([id, p]) => ({
+      id, name: p.name, body: p.body, trim: p.trim, price: p.price, owned: profile.paints.includes(id), current: profile.paint === id,
+      locked: p.price === 0 && !profile.paints.includes(id) ? 'Story reward' : null,
+    })),
+  });
+
+  const openGarage = (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    ui.garage({
+      state: garageState,
+      onUpgrade: (k) => {
+        const lvl = profile.upgrades[k];
+        const cost = UPGRADE_COST[lvl];
+        if (lvl >= MAX_UPGRADE || cost > profile.coins) return;
+        profile.coins -= cost;
+        profile.upgrades[k] = lvl + 1;
+        kart.setUpgrades(profile.upgrades);
+        saveProfile(profile);
+      },
+      onPaint: (id) => {
+        const p = PAINTS[id];
+        if (!profile.paints.includes(id)) {
+          if (p.price === 0 || p.price > profile.coins) return;
+          profile.coins -= p.price;
+          profile.paints.push(id);
+        }
+        profile.paint = id;
+        kart.setPaint(id);
+        saveProfile(profile);
+      },
+      onClose: () => {
+        state = prev === 'menu' ? 'title' : prev;
+        missions.refreshHud();
+        onClose();
+      },
+    });
+  };
+
+  const openRadioLog = (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    ui.radioLog(profile.radioLog, () => {
+      state = prev === 'menu' ? 'title' : prev;
+      onClose();
+    });
+  };
+
   const openPause = () => {
-    if (state !== 'play' || ui.modal) return;
+    if (state !== 'play' || ui.modal || cutscenes.playing) return;
     state = 'pause';
     touch?.setVisible(false);
     audio.suspend(true);
+    const back = () => {
+      state = 'play';
+      openPause2();
+    };
     ui.pause({
       onResume: play,
       onMap: () => openMap(),
-      onRestartLevel: () => {
-        void quest.restartLevel().then(play);
-      },
+      onGarage: missions.kartAllowed() ? () => openGarage(back) : null,
+      onMissions: () => openMissions(back),
+      onProgress: () => openProgress(back),
+      onRadioLog: () => openRadioLog(back),
+      onRestart: missions.def ? () => void missions.restart().then(play) : null,
       onTitle: toTitle,
     });
   };
@@ -232,8 +864,9 @@ async function boot(): Promise<void> {
     state = 'map';
     input.exitPointerLock();
     touch?.setVisible(false);
-    const tg = quest.targets();
-    ui.bigMap(player.position.x, player.position.z, tg.main, tg.extra, () => (from === 'pause' ? openPause2() : play()));
+    const f = focus();
+    const tg = missions.targets(kart.position);
+    ui.bigMap(f.x, f.z, extras.trialTarget() ?? tg.main, tg.extra, () => (from === 'pause' ? openPause2() : play()), mode === 'foot' && missions.kartAllowed() ? { x: kart.position.x, z: kart.position.z } : null);
   };
   const openPause2 = () => {
     state = 'play';
@@ -250,9 +883,37 @@ async function boot(): Promise<void> {
   // Dialogues and quizzes need the mouse; give it back when they close.
   let wasModal = false;
 
+  // Shader warm-up: everything that only shows up later (rain, sparks, fireflies, mission
+  // props, drones, rings, hidden interiors) is compiled now, behind the loading screen, so
+  // nothing stalls the first time it appears in play.
+  progress(0.97, 'Warming up the shaders');
+  portraits.makeAll(NPCS);
+  {
+    const warm = new THREE.Group();
+    const kinds: ItemModel[] = ['book', 'cube', 'breaker', 'usb', 'toolbox', 'gnss', 'torch', 'sandbag', 'evidence', 'module', 'part', 'panel', 'relay'];
+    warm.add(...(await Promise.all(kinds.map((k) => itemModel(k)))), coinModel(), shardModel());
+    const drone = new Drone(3);
+    warm.add(drone.obj, drone.light, new CheckRing(0, 0, 0, 0).obj);
+    warm.position.copy(camera.position);
+    scene.add(warm);
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    try {
+      await renderer.compileAsync(scene, camera);
+    } catch {
+      renderer.compile(scene, camera);
+    }
+    for (const o of hidden) o.visible = false;
+    scene.remove(warm);
+  }
   void loading.done();
   toTitle();
-  (window as unknown as { __campus: unknown }).__campus = { quest, player, ui, world, ground, scene, camera, renderer };
+  (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, enterKart, exitKart, get mode() { return mode; } };
 
   let last = performance.now();
   let acc = 0;
@@ -281,37 +942,89 @@ async function boot(): Promise<void> {
       resize();
     } else if (avg >= 18.5) good = 0;
   };
+  const kartHint = () => `${kart.boostUnlocked ? '<kbd>Shift</kbd> boost · ' : ''}<kbd>Space</kbd>+turn drift · <kbd>E</kbd> out${kart.vehicle.needsRecovery ? ' · <kbd>Hold R</kbd> flip' : ''}`;
+
   const loop = (now: number) => {
     requestAnimationFrame(loop);
     adapt(now - last);
-    const dt = THREE.MathUtils.clamp((now - last) / 1000, 0, 0.1);
+    const rdt = THREE.MathUtils.clamp((now - last) / 1000, 0, 0.1);
     last = now;
-    const playing = state === 'play' && !ui.modal;
+    // Slow motion for big moments (eases back in over its last part); a hit-stop freezes time briefly.
+    slow = Math.max(0, slow - rdt);
+    freeze = Math.max(0, freeze - rdt);
+    const dt = freeze > 0 ? 0 : rdt * (slow > 0 ? THREE.MathUtils.lerp(1, 0.3, Math.min(1, slow / 0.25)) : 1) * cutscenes.timeScale;
+    if (cinema.playingShots && state === 'play' && (input.pressed('interact') || input.pressed('jump'))) cinema.skip();
+    // A cutscene locks input: nothing below reads the controls while one plays.
+    const playing = state === 'play' && !ui.modal && !cinema.playingShots && !cutscenes.playing;
     if (ui.modal && !wasModal && state === 'play') input.exitPointerLock();
     if (!ui.modal && wasModal && state === 'play') lockOrPrompt();
     wasModal = ui.modal;
+    summonCooldown = Math.max(0, summonCooldown - dt);
+    kart.locked = !missions.kartAllowed();
 
+    // Sky blend (missions change the time of day), then the image-based light once settled.
+    if (skyT < 1) {
+      skyT = Math.min(1, skyT + dt / 2.5);
+      atmosphere.blend(skyFrom, skyTo, THREE.MathUtils.smoothstep(skyT, 0, 1), scene);
+      const dark = (s: AtmosphereState) => s === SKIES.night || s === SKIES.predawn;
+      atmosphere.skyUniforms.uSunVisible.value = dark(skyTo) ? (dark(skyFrom) ? 0 : 1 - skyT) : dark(skyFrom) ? skyT : 1;
+      renderer.toneMappingExposure = atmosphere.state.exposure;
+      if (skyT >= 1) {
+        atmosphere.buildEnvironment(renderer, scene);
+        atmosphere.apply(scene);
+        if (mode === 'kart') kart.vehicle.setLights(night || skyTo === SKIES.dusk);
+      }
+    }
+
+    let exitPressed = false;
+    let look = { x: 0, y: 0 };
     if (playing) {
       time += dt;
-      const look = input.consumeLook();
-      player.look(look.x, look.y);
-      if (input.pressed('jump')) player.requestJump();
+      look = input.consumeLook();
+      if (mode === 'foot') {
+        player.look(look.x, look.y);
+        if (input.pressed('jump')) player.requestJump();
+        if (input.pressed('KeyK')) summonKart();
+      } else {
+        const { exitRequested } = kart.handleInput(input, dt);
+        exitPressed = exitRequested;
+      }
       if (input.pressed('map')) openMap();
+      if (input.pressed('KeyG') && missions.kartAllowed() && (mode === 'foot' || Math.abs(kart.vehicle.phys.speed) < 1)) {
+        state = 'menu';
+        input.exitPointerLock();
+        openGarage(play);
+      }
       // Esc is handled through the pointer-lock release; P pauses directly.
       if (input.pressed('KeyP')) openPause();
       acc += dt;
       let steps = 0;
       while (acc >= FIXED_DT && steps < 6) {
         player.update(FIXED_DT, input);
+        kart.fixedUpdate(FIXED_DT);
         physics.step();
         acc -= FIXED_DT;
         steps += 1;
       }
       if (steps === 6) acc = 0;
-    } else input.consumeLook();
+      kart.postPhysics();
+      physics.eventQueue.drainContactForceEvents((e) => {
+        const f = e.totalForceMagnitude();
+        if (f > 2500) {
+          const k = Math.min(1, f / 15000);
+          audio.impact(k, kart.position);
+          kart.vehicle.shake = Math.max(kart.vehicle.shake, k);
+        }
+      });
+    } else {
+      input.consumeLook();
+      if (!kart.occupied) kart.vehicle.phys.input = { throttle: 0, steer: 0, handbrake: true };
+    }
     const alpha = acc / FIXED_DT;
     const adt = state === 'play' ? dt : 0;
-    player.animate(adt, alpha, null);
+    kart.update(adt, alpha, time);
+    if (mode === 'kart') kart.seatDriver(player, adt || 1e-3);
+    else player.animate(adt, alpha, null);
 
     if (state === 'title') {
       // Slow drift over the campus with the Annapurnas behind.
@@ -321,24 +1034,149 @@ async function boot(): Promise<void> {
       const cz = 160 + Math.cos(t) * 60;
       camera.position.set(cx, ground.heightAt(cx, cz) + 42, cz);
       camera.lookAt(60, 10, -120);
-    } else player.applyCamera(camera, dt);
-
-    for (const p of people) p.update(state === 'title' ? dt : adt, camera.position, state === 'play' ? player.renderPos : null);
-    quest.update(adt, playing, player.renderPos, playing && input.pressed('interact'));
-    if (state === 'play') {
-      const heading = (((-player.yaw * 180) / Math.PI) % 360 + 360) % 360;
-      const tg = quest.targets();
-      ui.updateNav(player.renderPos.x, player.renderPos.z, heading, tg.main, tg.extra);
-      touch?.update({ mode: 'foot', prompt: quest.promptText ? { text: quest.promptText, progress: 0 } : null, radio: null, armed: false, drawn: false, needsRecovery: false, flashlight: false, lights: false });
+    } else if (mode === 'kart') {
+      if (playing) {
+        kart.vehicle.updateCamera(camera, dt, look, settings.mouseSensitivity);
+        // A little speed: wider view as Kalki goes faster, more when boosting.
+        const want = settings.fov + Math.min(10, kart.speedKmh * 0.12) + (kart.boosting || kart.turbo > 0 ? 9 : 0);
+        camera.fov = THREE.MathUtils.damp(camera.fov, want, 4, dt);
+        camera.updateProjectionMatrix();
+      }
+    } else {
+      player.applyCamera(camera, dt);
     }
+    // Cinematic cameras (intros, conversations, victory orbit) take over when running.
+    cinema.update(rdt, camera);
+    cutscenes.update(rdt, camera);
+    document.body.classList.toggle('cq-cinematic', cinema.active || cutscenes.playing);
+    tarp.update(rdt);
+    droneEyes.update(rdt, now / 1000);
+
+    // ---------------------------------------------------------------- effects
+    if (mode === 'kart' && playing) {
+      const sp = Math.abs(kart.vehicle.phys.speed);
+      const back = kart.backward();
+      const contacts = kart.rearContacts();
+      const lvl = kart.driftLevel;
+      if (lvl > lastDrift) audio.play('driftCharge');
+      lastDrift = lvl;
+      if (kart.driftDir) {
+        const colour = new THREE.Color(lvl >= 3 ? '#ff4ad8' : lvl >= 2 ? '#ff9a3c' : lvl >= 1 ? '#38c8ff' : '#fff2c0');
+        for (const c of contacts) {
+          if (Math.random() < (lvl ? 0.9 : 0.35)) sparks.emit(c, new THREE.Vector3(back.x * 3 + (Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, back.z * 3 + (Math.random() - 0.5) * 3), colour, 0.35 + Math.random() * 0.25);
+        }
+      }
+      for (const c of contacts) if (!kart.airborne) dust.emit(dt, c, back, sp * (kart.driftDir ? 1.6 : 1), kart.driftDir ? 'gravel' : kart.vehicle.phys.wheelSurface[2]);
+      if (kart.boosting || kart.turbo > 0) {
+        const ex = kart.vehicle.localToWorld(kart.parts.anchors.exhaust);
+        sparks.emit(ex, back.clone().multiplyScalar(4).setY(0.6), new THREE.Color(kart.turbo > 0 ? '#9fe7ff' : '#ffb44a'), 0.3, 1);
+      }
+      ui.setSpeedLines(kart.boosting || kart.turbo > 0 ? 0.9 : THREE.MathUtils.clamp((kart.speedKmh - 48) / 40, 0, 0.35));
+    } else {
+      lastDrift = 0;
+      ui.setSpeedLines(0);
+    }
+    sparks.update(dt);
+    dust.update(dt);
+    // Weather: the monsoon storm through the middle of the night, lightning and thunder with it.
+    const weather = state === 'title' ? 'clear' : missions.def ? WEATHER[missions.def.id] ?? 'clear' : 'clear';
+    rain.level = weather === 'storm' ? 1 : weather === 'drizzle' ? 0.35 : 0;
+    lightning.enabled = weather === 'storm' && !cinema.playingShots;
+    rain.update(rdt, camera.position);
+    sound.setRain(rain.level, rdt);
+    const flash = lightning.update(rdt);
+    ui.setFlash(flash);
+    // Wet ground follows the rain slowly (it takes a while to dry).
+    wet += (rain.level - wet) * Math.min(1, rdt * (rain.level > wet ? 0.35 : 0.08));
+    world.setWet(wet);
+    // Night lighting: how dark it is, and campus power easing up to the story's level.
+    const dark = THREE.MathUtils.clamp((3.05 - atmosphere.state.sunIntensity) / 1.7, 0, 1);
+    const powerStep = rdt * powerRate;
+    powerShown += THREE.MathUtils.clamp(powerTo - powerShown, -powerStep, powerStep);
+    world.setLights(state === 'title' ? 0 : powerShown, Math.max(dark, glowMin));
+    // Sound follows the same night: birds by day, crickets, frogs and dogs after dark.
+    audio.dusk = dark;
+    audio.wet = wet;
+    sound.updateAmbience(rdt, state === 'title' ? 0 : dark, rain.level, wet, state === 'play');
+    fireflies.amount = state === 'play' && weather !== 'storm' ? THREE.MathUtils.clamp((dark - 0.6) * 2.5, 0, 1) * (weather === 'drizzle' ? 0.4 : 1) : 0;
+    fireflies.update(rdt, time, focus(), renderer.getPixelRatio());
+    if (skyT >= 1) renderer.toneMappingExposure = atmosphere.state.exposure + flash * 1.2;
+    if (fireworks > 0) {
+      fireworks -= rdt;
+      if (Math.random() < rdt * 2.8) {
+        const p = fireworkAt.clone().add(new THREE.Vector3((Math.random() - 0.5) * 40, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 40));
+        sparks.burst(p, FIRE[Math.floor(Math.random() * FIRE.length)]);
+        audio.impact(0.2, p);
+      }
+    }
+
+    for (const p of people) p.update(state === 'title' ? dt : adt, camera.position, state === 'play' ? focus() : null);
+
+    // Missions take E first; otherwise E gets in / out of Kalki.
+    const f = focus();
+    const interact = playing && input.pressed('interact');
+    missions.update(adt, playing, f, interact && mode === 'foot', mode === 'foot' ? kart.position : null);
+    const busyTrial = !!missions.stepDef && (missions.stepDef.kind === 'drive' || missions.stepDef.kind === 'chase');
+    extras.update(adt, playing, f, mode === 'kart', busyTrial);
+    if (playing && mode === 'foot' && !missions.promptText) {
+      const door = kart.vehicle.driverDoorWorld();
+      const near = Math.hypot(door.x - player.renderPos.x, door.z - player.renderPos.z) < 2.4 || kart.position.distanceTo(player.renderPos) < 2.2;
+      if (near) {
+        if (kart.locked) ui.setPrompt('Kalki is locked — Dhungana sir has the key');
+        else {
+          ui.setPrompt('Get in Kalki');
+          if (interact) enterKart();
+        }
+      }
+    }
+    if (mode === 'kart') {
+      ui.setPrompt(null);
+      if (exitPressed) {
+        if (Math.abs(kart.vehicle.phys.speed) < 3) exitKart();
+        else ui.toast('Slow down to get out');
+      }
+    }
+
+    if (state === 'play') {
+      // Compass heading, degrees clockwise from north (-Z).
+      const dir = camera.getWorldDirection(new THREE.Vector3());
+      const heading = mode === 'kart' ? ((Math.atan2(dir.x, -dir.z) * 180) / Math.PI + 360) % 360 : (((-player.yaw * 180) / Math.PI) % 360 + 360) % 360;
+      const tg = missions.targets(kart.position);
+      const trial = extras.trialTarget();
+      ui.updateNav(f.x, f.z, heading, trial ?? tg.main, trial ? [] : tg.extra, extras.nearShards(f.x, f.z), mode === 'foot' && missions.kartAllowed() ? { x: kart.position.x, z: kart.position.z } : null);
+      ui.setCallKart(playing && mode === 'foot' && missions.kartAllowed() && kart.position.distanceTo(player.renderPos) > 15);
+      ui.setSpeed(mode === 'kart' ? { kmh: kart.speedKmh, boost: kart.boost, boostOn: kart.boostUnlocked, boosting: kart.boosting || kart.turbo > 0, hint: kartHint(), drift: kart.driftDir ? kart.driftT : 0, driftLevel: kart.driftLevel } : null);
+      touch?.update({
+        mode: mode === 'kart' ? 'vehicle' : 'foot',
+        prompt: missions.promptText ? { text: missions.promptText, progress: 0 } : null,
+        radio: null, armed: false, drawn: false, needsRecovery: mode === 'kart' && kart.vehicle.needsRecovery, flashlight: false, lights: kart.vehicle.lightsOn,
+      });
+    }
+    const ph = kart.vehicle.phys;
+    sound.updateKart({
+      on: ph.engineOn && mode === 'kart', speed: ph.speed, throttle: state === 'play' ? Math.abs(ph.input.throttle) : 0,
+      drift: kart.driftDir ? 1 : 0, airborne: kart.airborne, boosting: kart.boosting || kart.turbo > 0,
+      surface: ph.wheelSurface[2], pos: kart.position,
+    }, rdt);
     world.update(time, camera);
-    atmosphere.update(dt, camera.position, camera);
+    atmosphere.update(dt, focus(), camera);
     windUniforms.uTime.value = time + titleT;
     windUniforms.uGust.value = 0.45 + 0.35 * Math.sin(time * 0.21) * Math.sin(time * 0.077 + 1.3);
     windUniforms.uSunTrans.value.copy(atmosphere.sun.color).multiplyScalar(atmosphere.sun.intensity * 0.4);
     windUniforms.uSkyTrans.value.copy(atmosphere.state.horizon).multiplyScalar(atmosphere.state.envIntensity);
     audio.update(dt, camera, windUniforms.uGust.value, 0.25, []);
+    // Camera punch on big moments: applied for this render only, so no camera rig sees it.
+    punch = Math.max(0, punch - rdt * 4);
+    const fov0 = camera.fov;
+    if (punch > 0) {
+      camera.fov = fov0 - punch * punch * 4;
+      camera.updateProjectionMatrix();
+    }
     renderer.render(scene, camera);
+    if (punch > 0) {
+      camera.fov = fov0;
+      camera.updateProjectionMatrix();
+    }
     input.endFrame();
   };
   requestAnimationFrame(loop);

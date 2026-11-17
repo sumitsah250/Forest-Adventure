@@ -43,6 +43,10 @@ export class Vehicle {
   onImpact: ((strength: number) => void) | null = null;
   /** Camera shake from impacts (0..1), decays quickly. */
   shake = 0;
+  /** Chase camera: distance behind, pivot height above the body origin, and extra distance per m/s. */
+  chaseDistance = 6.6;
+  chaseHeight = 1.45;
+  chaseStretch = 0.05;
 
   constructor(physics: PhysicsWorld, terrain: TerrainData, spec: VehicleSpec, parts: VehicleParts, x: number, z: number, heading: number, headlightShadows: boolean) {
     this.physics = physics;
@@ -269,8 +273,8 @@ export class Vehicle {
       }
     }
     const heading = Math.atan2(b.fx, b.fz) + this.orbitYaw + (this.phys.speed < -1 ? 0 : 0);
-    const dist = 6.6 + Math.min(1.6, Math.abs(this.phys.speed) * 0.05);
-    const pivot = this.tmp2.copy(this.renderPos).add(new THREE.Vector3(0, 1.45, 0));
+    const dist = this.chaseDistance + Math.min(1.6, Math.abs(this.phys.speed) * this.chaseStretch);
+    const pivot = this.tmp2.copy(this.renderPos).add(new THREE.Vector3(0, this.chaseHeight, 0));
     const desired = this.tmp.set(
       pivot.x - Math.sin(heading) * Math.cos(this.orbitPitch) * dist,
       pivot.y + Math.sin(this.orbitPitch) * dist + 0.6,

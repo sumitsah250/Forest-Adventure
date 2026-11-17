@@ -72,9 +72,13 @@ export class CampusGround {
   private pads = new Map<BuildingData, number>();
   /** Stepped spectator stands. */
   readonly tiers: Tiers[] = [];
+  /** Buildings standing on a stand (the WRC pavilion): they sit on the terraces, with no dirt pad. */
+  readonly podiums: { b: BuildingData; t: Tiers; front: number }[] = [];
   /** Surface classes, CLS codes, `clsN`² cells over the playable square. */
   cls: Uint8Array = new Uint8Array(1);
   clsN = 1;
+  /** The forest terrain's drivable road paths; the campus has none in that form (vehicles recover in place). */
+  readonly roads: never[] = [];
 
   constructor() {
     const e = DATA.elevation;
@@ -217,6 +221,20 @@ export class CampusGround {
       const t: Tiers = { ox, oz, ux, uz, vx, vz, halfLen: r.hl, depth, count, lower: best.level, rise: drop / count };
       this.tiers.push(t);
       grades.push({ prio: 3, apron: 0, fall: 6, poly: a.pts, ramp: t, bb: grow(bounds(a.pts), 7) });
+      // A building on the stand (the pavilion): drop its own pad, which would heap dirt over the
+      // terraces, and stand it on the terrace at its front edge instead.
+      for (const b of DATA.buildings) {
+        const [bx, bz] = centroid(b.pts);
+        const bu = (bx - ox) * ux + (bz - oz) * uz;
+        const bv = (bx - ox) * vx + (bz - oz) * vz;
+        if (Math.abs(bu) > r.hl || bv < 0 || bv > depth || !this.pads.has(b)) continue;
+        const front = Math.max(0, Math.min(...b.pts.map(([x, z]) => (x - ox) * vx + (z - oz) * vz)));
+        const k = Math.min(count - 1, Math.floor(front / (depth / count)));
+        this.pads.set(b, t.lower + (k + 1) * t.rise);
+        this.podiums.push({ b, t, front });
+        const i = grades.findIndex((g) => g.poly === b.pts);
+        if (i >= 0) grades.splice(i, 1);
+      }
     }
     // Roads, paths and steps: profiled corridors.
     for (const l of DATA.lines) {

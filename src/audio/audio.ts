@@ -38,6 +38,8 @@ export class AudioEngine implements SfxApi {
   private peckTimer = 25;
   private owlTimer = 40;
   dusk = 0;
+  /** Wet ground (0..1): footsteps splash. */
+  wet = 0;
   private listenerPos = new THREE.Vector3();
   private volume = 0.8;
 
@@ -81,6 +83,20 @@ export class AudioEngine implements SfxApi {
     this.pink = this.noise('pink', 4);
     this.brown = this.noise('brown', 4);
     this.setVolume(0.8);
+  }
+
+  /** Output buses and state for other sound modules (the campus soundscape). */
+  get buses(): { sfx: GainNode; amb: GainNode; veh: GainNode; reverb: GainNode } {
+    return { sfx: this.sfx, amb: this.amb, veh: this.veh, reverb: this.reverbSend };
+  }
+
+  get running(): boolean {
+    return this.started;
+  }
+
+  /** Listener position (camera), updated in update(). */
+  get listener(): THREE.Vector3 {
+    return this.listenerPos;
   }
 
   setVolume(v: number): void {
@@ -455,13 +471,20 @@ export class AudioEngine implements SfxApi {
         this.tone(out, t, 420, 400, 0.18, 0.2 * v, 'triangle');
         this.burst(out, t, { type: 'bandpass', freq: 3200, q: 3, dur: 0.05, vol: 0.4 * v });
         break;
-      case 'rock':
-        this.burst(out, t, { type: 'bandpass', freq: 3600, q: 1.5, dur: 0.04, vol: 0.45 * v });
-        this.tone(out, t, 220, 150, 0.05, 0.3 * v);
+      case 'rock': {
+        // Shoe on concrete or stone: heel strike (thud + click), toe slap a beat later, a little scuff.
+        const toe = 0.055 + Math.random() * 0.03;
+        this.tone(out, t, 120, 70, 0.07, 0.4 * v);
+        this.burst(out, t, { type: 'bandpass', freq: 2200 + Math.random() * 800, q: 1.2, dur: 0.035, vol: 0.5 * v });
+        this.burst(out, t + toe, { type: 'bandpass', freq: 3400 + Math.random() * 900, q: 1.4, dur: 0.025, vol: 0.28 * v });
+        this.burst(out, t + toe * 0.6, { buf: this.pink, type: 'highpass', freq: 2600, dur: 0.07, vol: 0.12 * v, attack: 0.01 });
         break;
+      }
       case 'grass':
       case 'moss':
-        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 1500, q: 0.6, dur: 0.13, vol: 0.45 * v, attack: 0.015 });
+        // Blades crushed under the sole: a soft swish in two parts (heel, then toe) and a dull thud.
+        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 1300 + Math.random() * 500, q: 0.6, dur: 0.12, vol: 0.4 * v, attack: 0.015 });
+        this.burst(out, t + 0.06, { buf: this.pink, type: 'bandpass', freq: 2600 + Math.random() * 900, q: 0.8, dur: 0.09, vol: 0.18 * v, attack: 0.01 });
         this.tone(out, t, 80, 55, 0.08, 0.25);
         break;
       default:
@@ -470,11 +493,18 @@ export class AudioEngine implements SfxApi {
         for (let i = 0; i < 3; i += 1) this.burst(out, t + Math.random() * 0.06, { type: 'bandpass', freq: 3000 + Math.random() * 2000, q: 2, dur: 0.012, vol: 0.25 * v });
         this.tone(out, t, 85, 55, 0.08, 0.3);
     }
+    // Wet ground: every step lands in a film of water.
+    if (this.wet > 0.15 && surface !== 'water') {
+      const w = Math.min(1, this.wet) * v;
+      this.burst(out, t + 0.01, { buf: this.pink, type: 'bandpass', freq: 1500 + Math.random() * 700, q: 0.7, dur: 0.16, vol: 0.4 * w, attack: 0.008 });
+      this.burst(out, t + 0.04, { buf: this.white, type: 'highpass', freq: 4200, dur: 0.12, vol: 0.12 * w, attack: 0.01 });
+    }
   }
 
   // ------------------------------------------------------------ vehicle
 
-  engineStart(pos: THREE.Vector3): void {
+  /** Starter motor, then the engine catches. `starterOnly` leaves the running engine to another module. */
+  engineStart(pos: THREE.Vector3, starterOnly = false): void {
     if (!this.started) return;
     const c = this.ctx;
     const t = c.currentTime;
@@ -506,7 +536,7 @@ export class AudioEngine implements SfxApi {
     lfo.start(t);
     o.stop(t + 0.9);
     lfo.stop(t + 0.9);
-    this.ensureEngine();
+    if (!starterOnly) this.ensureEngine();
   }
 
   private ensureEngine(): void {
@@ -592,7 +622,58 @@ export class AudioEngine implements SfxApi {
     this.burst(out, t, { type: 'bandpass', freq: 2400, q: 1, dur: 0.12, vol: 0.25 });
   }
 
+  private rain: { gain: GainNode; hiss: GainNode } | null = null;
+
+  /** Steady rain (0 = off, 1 = monsoon downpour): a filtered noise bed with a patter layer. */
+  setRain(level: number): void {
+    if (!this.started) return;
+    const c = this.ctx;
+    if (!this.rain) {
+      const gain = c.createGain();
+      gain.gain.value = 0;
+      const bed = this.src(this.pink, true);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 2600;
+      const hiss = c.createGain();
+      const top = this.src(this.white, true);
+      const hp = c.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 5000;
+      bed.connect(lp).connect(gain);
+      top.connect(hp).connect(hiss).connect(gain);
+      gain.connect(this.amb);
+      bed.start();
+      top.start();
+      this.rain = { gain, hiss };
+    }
+    const t = c.currentTime;
+    this.rain.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.28, t, 0.8);
+    this.rain.hiss.gain.setTargetAtTime(0.35 * level, t, 0.8);
+  }
+
   // ------------------------------------------------------------ one-shots
+
+  /**
+   * A pick-up chime that climbs a major pentatonic scale with the combo count, so a chain
+   * of good moves sounds like it is going somewhere.
+   */
+  chime(step: number): void {
+    if (!this.started) return;
+    const c = this.ctx;
+    const t = c.currentTime + 0.01;
+    const out = c.createGain();
+    out.gain.value = 1;
+    out.connect(this.sfx);
+    out.connect(this.reverbSend);
+    const scale = [0, 2, 4, 7, 9];
+    const k = Math.max(0, Math.min(14, step - 1));
+    const semis = scale[k % 5] + 12 * Math.floor(k / 5);
+    const f = 784 * 2 ** (semis / 12);
+    this.tone(out, t, f, f, 0.22, 0.08, 'triangle');
+    this.tone(out, t + 0.05, f * 1.5, f * 1.5, 0.3, 0.05, 'triangle');
+    if (step >= 5) this.tone(out, t + 0.1, f * 2, f * 2, 0.35, 0.035, 'sine');
+  }
 
   play(name: string, pos?: THREE.Vector3, gain = 1): void {
     if (!this.started) return;
@@ -613,6 +694,65 @@ export class AudioEngine implements SfxApi {
         out.connect(this.reverbSend);
         this.tone(out, t, 220, 220, 1.4, 0.12);
         this.tone(out, t, 330, 330, 1.4, 0.08);
+        break;
+      case 'thunder': {
+        // A crack, then a long rolling rumble.
+        out.connect(this.reverbSend);
+        this.burst(out, t, { buf: this.white, type: 'highpass', freq: 1800, dur: 0.25, vol: 0.35 });
+        for (let i = 0; i < 4; i += 1) this.burst(out, t + 0.08 + i * 0.45 + Math.random() * 0.2, { buf: this.brown, type: 'lowpass', freq: 160 + Math.random() * 120, dur: 1.6 + Math.random(), vol: 0.9 - i * 0.15, attack: 0.08 });
+        break;
+      }
+      case 'whoosh':
+        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 700, q: 1.4, dur: 0.55, vol: 0.45, attack: 0.18 });
+        this.burst(out, t + 0.1, { buf: this.white, type: 'bandpass', freq: 2200, q: 2, dur: 0.4, vol: 0.18, attack: 0.15 });
+        break;
+      case 'sting': {
+        // Mission title card: a low hit and a rising minor chord.
+        out.connect(this.reverbSend);
+        this.tone(out, t, 90, 45, 1.2, 0.5);
+        this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 300, dur: 1, vol: 0.7, attack: 0.01 });
+        for (const [f, d] of [[220, 0], [261.6, 0.08], [329.6, 0.16], [440, 0.3]] as const) this.tone(out, t + d, f, f, 2.2, 0.07, 'triangle');
+        break;
+      }
+      case 'boost':
+        this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 500, q: 1, dur: 0.7, vol: 0.6, attack: 0.05 });
+        this.tone(out, t, 180, 520, 0.5, 0.12, 'sawtooth');
+        break;
+      case 'driftCharge':
+        this.tone(out, t, 880, 1320, 0.18, 0.08, 'square');
+        break;
+      case 'air':
+        this.tone(out, t, 520, 780, 0.25, 0.1, 'triangle');
+        break;
+      case 'blip':
+        // Dialogue "voice": a tiny pitched blip per few letters (gain carries the speaker's pitch).
+        this.tone(out, t, 420 + gain * 380, 400 + gain * 360, 0.045, 0.05, 'square');
+        break;
+      case 'glitch':
+        this.tone(out, t, 1800 + Math.random() * 1600, 300, 0.05, 0.035, 'sawtooth');
+        break;
+      case 'combo':
+        this.tone(out, t, 1046, 1046, 0.18, 0.07, 'triangle');
+        this.tone(out, t + 0.07, 1568, 1568, 0.25, 0.06, 'triangle');
+        break;
+      case 'power': {
+        // Power back on: a mains hum swelling up, a relay clack and a bright chord.
+        out.connect(this.reverbSend);
+        this.tone(out, t, 50, 100, 1.4, 0.22, 'sawtooth');
+        this.tone(out, t, 100, 200, 1.4, 0.08, 'square');
+        this.burst(out, t + 0.05, { type: 'bandpass', freq: 2600, q: 4, dur: 0.05, vol: 0.5 });
+        for (const [f, d] of [[523.3, 0.5], [659.3, 0.62], [784, 0.74], [1046.5, 0.9]] as const) this.tone(out, t + d, f, f, 1.6, 0.06, 'triangle');
+        break;
+      }
+      case 'chirp':
+        // MITRA about to speak: two quick rising notes, like a terminal waking.
+        this.tone(out, t, 1320, 1760, 0.07, 0.07, 'square');
+        this.tone(out, t + 0.08, 1760, 2640, 0.09, 0.05, 'triangle');
+        break;
+      case 'badge':
+        out.connect(this.reverbSend);
+        for (const [f, d] of [[784, 0], [988, 0.09], [1175, 0.18], [1568, 0.3]] as const) this.tone(out, t + d, f, f, 0.7, 0.07, 'triangle');
+        this.tone(out, t + 0.3, 392, 392, 0.9, 0.06);
         break;
       case 'doorOpen':
         this.tone(out, t, 210, 260, 0.45, 0.12, 'triangle');

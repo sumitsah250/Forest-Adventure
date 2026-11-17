@@ -292,3 +292,13 @@ export function buildingAt(x: number, z: number): BuildingData | undefined {
   }
   return bd < 25 ? best : undefined;
 }
+
+/**
+ * A stable number in 0.02..1 per building: the order in which its windows light up as the
+ * story restores power (a building is lit once the power level passes it).
+ */
+export function glowSeed(b: BuildingData): number {
+  const [x, z] = b.pts[0];
+  const h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return 0.02 + (h - Math.floor(h)) * 0.98;
+}

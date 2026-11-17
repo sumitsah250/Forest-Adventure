@@ -15,12 +15,13 @@ import { barkMaterial, foliageDepthMaterial, foliageMaterial } from '../render/f
 import { mulberry32, range, hash2 } from '../world/rng.ts';
 import { signTexture } from '../world/build.ts';
 import {
-  DATA, GATE, WORLD_HALF, buildingAt, centroid, orientedRect, pointInPoly, polyArea, segDist,
+  DATA, GATE, WORLD_HALF, buildingAt, centroid, glowSeed, orientedRect, pointInPoly, polyArea, segDist,
   type BuildingData, type Pt,
 } from './geo.ts';
 import { CLS, type CampusGround } from './ground.ts';
 import { classGrid, paintPlan } from './paint.ts';
 import { buildEnterable } from './interior.ts';
+import type { GateSpot } from './props.ts';
 
 export interface Entrance {
   /** Where a person stands in front of the door, facing out. */
@@ -43,7 +44,58 @@ export interface CampusWorld {
   entrances: Map<BuildingData, Entrance>;
   entranceFor(b: BuildingData, label?: string): Entrance;
   flag: THREE.Mesh | null;
+  /** The main gate: where it stands and which way is into campus. */
+  gate: GateSpot;
   update(t: number, camera: THREE.Camera): void;
+  /**
+   * Night lighting: `power` 0..1 is how much of campus has its power back (buildings light
+   * up in a fixed order as it rises), `night` 0..1 how dark it is (windows glow with it).
+   */
+  setLights(power: number, night: number): void;
+  /** Rain on the ground, 0..1: glossier and darker. */
+  setWet(f: number): void;
+}
+
+/** Shared by every building material: one uniform write per frame, no recompiles. */
+const LIGHTS = { uPower: { value: 0 }, uNight: { value: 0 }, uLitTime: { value: 0 } };
+/** Town houses outside the campus wall never lost power. */
+const TOWN_POWER = { value: 1 };
+
+/**
+ * Lit windows, folded into the facade material: the window rectangle of the tiling texture
+ * (in texture space, so no extra texture) glows when the building has power, room by room
+ * (some dark, some warm bulbs, some cool tube lights). Unpowered blocks flicker with red
+ * emergency lights here and there. `rect` is the window in UV (u0, v0, u1, v1).
+ */
+function windowGlow(mat: THREE.MeshStandardMaterial, rect: [number, number, number, number], power: { value: number }): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uPower = power;
+    shader.uniforms.uNight = LIGHTS.uNight;
+    shader.uniforms.uLitTime = LIGHTS.uLitTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aWind;\nvarying float vGlowSeed;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlowSeed = aWind;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uPower;\nuniform float uNight;\nuniform float uLitTime;\nvarying float vGlowSeed;')
+      .replace('#include <emissivemap_fragment>', /* glsl */ `#include <emissivemap_fragment>
+      if ( vGlowSeed > 0.0 && uNight > 0.01 ) {
+        vec2 cell = floor( vMapUv );
+        vec2 f = fract( vMapUv );
+        float win = step( ${rect[0].toFixed(3)}, f.x ) * step( f.x, ${rect[2].toFixed(3)} ) * step( ${rect[1].toFixed(3)}, f.y ) * step( f.y, ${rect[3].toFixed(3)} );
+        win *= step( 0.018, abs( f.x - 0.5 ) );
+        float h = fract( sin( dot( cell + vGlowSeed * 17.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+        float powered = step( vGlowSeed, uPower );
+        float on = powered * step( 0.3, h );
+        float emerg = ( 1.0 - powered ) * step( vGlowSeed, 0.1 ) * step( 0.62, h ) * ( 0.5 + 0.5 * step( 0.0, sin( uLitTime * 6.0 + h * 40.0 ) ) );
+        // Warm bulbs and cool tube lights, each room a little brighter or dimmer.
+        vec3 lamp = mix( vec3( 1.0, 0.6, 0.26 ), vec3( 0.62, 0.8, 1.0 ) * 0.85, step( 0.66, h ) ) * ( 0.55 + 0.45 * fract( h * 7.13 ) );
+        // Brighter towards the top of the pane, like a ceiling light seen from outside.
+        float fall = 0.75 + 0.25 * smoothstep( ${rect[1].toFixed(3)}, ${rect[3].toFixed(3)}, f.y );
+        totalEmissiveRadiance += win * uNight * fall * ( on * lamp * 0.95 + emerg * vec3( 0.9, 0.12, 0.05 ) );
+      }`);
+  };
+  // Same program for every building material that uses it.
+  mat.customProgramCacheKey = () => `window-glow-${rect.join(',')}`;
 }
 
 export interface WorldOptions {
@@ -57,6 +109,19 @@ export interface WorldOptions {
 }
 
 const STOREY = 3.2;
+
+/**
+ * Openings in mapped fences that the map data closes off. The little park around the Sahid
+ * Abinash Statue has a gap in its wall at the south-west corner, but a fence drawn along the
+ * same line seals it; keep the gap open.
+ */
+const FENCE_GATES = [
+  { x: 100, z: -87, r: 1.8 },
+  // The railing ring around the IOE fountain is mapped closed; open it on the path side
+  // (north, where the footway from the gate road arrives) and on the road side (east).
+  { x: 91.6, z: -175.9, r: 1.7 },
+  { x: 95.4, z: -180.5, r: 1.6 },
+];
 
 export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const { ground, physics, preset } = o;
@@ -77,7 +142,9 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   groundTex.anisotropy = 8;
   groundTex.generateMipmaps = true;
   const detail = detailTexture();
-  group.add(groundMesh(ground, groundTex, detail));
+  const groundObj = groundMesh(ground, groundTex, detail);
+  const groundMat = groundObj.material as THREE.MeshStandardMaterial;
+  group.add(groundObj);
   group.add(outerGround(ground, detail));
   await nextFrame();
 
@@ -91,6 +158,9 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     flat: new THREE.MeshStandardMaterial({ map: concrete.map, normalMap: concrete.normalMap, roughnessMap: concrete.roughnessMap, vertexColors: true, side: THREE.DoubleSide }),
     tin: new THREE.MeshStandardMaterial({ map: tin.map, normalMap: tin.normalMap, roughnessMap: tin.roughnessMap, vertexColors: true, metalness: 0.35, side: THREE.DoubleSide }),
   };
+  // Window rectangles of facadeTexture() and shopTexture() in UV (the canvas is flipped).
+  windowGlow(mats.facade, [52 / 256, 1 - 172 / 256, 204 / 256, 1 - 54 / 256], LIGHTS.uPower);
+  windowGlow(mats.shop, [70 / 256, 1 - 170 / 256, 186 / 256, 1 - 70 / 256], TOWN_POWER);
   const B = { facade: new GeoBuilder(), shop: new GeoBuilder(), plain: new GeoBuilder(), flat: new GeoBuilder(), tin: new GeoBuilder() };
   const kit = new Kit();
   const rng = mulberry32(2044);
@@ -146,12 +216,12 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   boundaryWall(kit, ground, physics, panels);
   for (const l of DATA.lines) {
     if (l.kind === 'wall') linearBarrier(kit, ground, physics, l.pts, 'wall', [], panels);
-    if (l.kind === 'fence') linearBarrier(kit, ground, physics, l.pts, 'fence', [], panels);
+    if (l.kind === 'fence') linearBarrier(kit, ground, physics, l.pts, 'fence', FENCE_GATES, panels);
     if (l.kind === 'steps') stairs(kit, ground, l.pts, l.w);
   }
   standTiers(kit, ground, physics);
 
-  mainGate(group, kit, ground, physics);
+  const gate = mainGate(group, kit, ground, physics);
   o.progress(0.55, 'Placing benches, lamps and statues');
   let flag: THREE.Mesh | null = null;
   for (const p of DATA.points) {
@@ -176,10 +246,27 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     if (admin) flag = flagpole(group, kit, admin.x + 4, ground.heightAt(admin.x + 4, admin.z - 14), admin.z - 14, physics);
   }
   for (const a of DATA.areas) if (a.kind === 'pitch' || a.kind === 'ground') sports(kit, ground, physics, a.pts, (a.sport ?? '').split(';')[0], a.kind);
-  // Courts with ball games that fly (tennis, futsal) are fenced in chain-link.
+  // Courts with ball games that fly (tennis, futsal) are fenced in chain-link, with a gate in
+  // the middle of each long side so players can walk in.
   for (const a of DATA.areas) {
     const sp = (a.sport ?? '').split(';')[0];
-    if (a.kind === 'pitch' && ['tennis', 'futsal'].includes(sp)) linearBarrier(kit, ground, physics, [...a.pts, a.pts[0]], 'fence', [], panels, 3.2);
+    if (a.kind !== 'pitch' || !['tennis', 'futsal'].includes(sp)) continue;
+    const ring = [...a.pts, a.pts[0]];
+    const sides = ring.slice(0, -1).map((p, i) => {
+      const q = ring[i + 1];
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+      return { len, x: (p[0] + q[0]) / 2, z: (p[1] + q[1]) / 2, dx: (q[0] - p[0]) / len, dz: (q[1] - p[1]) / len };
+    });
+    const long = [...sides].sort((s, t) => t.len - s.len).slice(0, 2);
+    linearBarrier(kit, ground, physics, ring, 'fence', long.map((s) => ({ x: s.x, z: s.z, r: 1.7 })), panels, 3.2);
+    // Gate posts either side of each opening.
+    for (const s of long) {
+      for (const k of [-1.6, 1.6]) {
+        const x = s.x + s.dx * k;
+        const z = s.z + s.dz * k;
+        kit.cyl('green', 0.07, 3.3, x, ground.heightAt(x, z), z, 8);
+      }
+    }
   }
   panels.grill.build(group, grillTexture(), 'boundary-grill');
   panels.chain.build(group, chainTexture(), 'chain-link');
@@ -210,7 +297,20 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     entrances,
     entranceFor,
     flag,
+    gate,
+    setLights(power: number, night: number) {
+      LIGHTS.uPower.value = power;
+      LIGHTS.uNight.value = night;
+    },
+    setWet(f: number) {
+      const g = groundMat;
+      if (!g) return;
+      // Damp, not mirror-like: a strong moon at grazing angles blows out anything glossier.
+      g.roughness = 0.95 - 0.17 * f;
+      g.color.setScalar(1 - 0.28 * f);
+    },
     update(t: number, camera: THREE.Camera) {
+      LIGHTS.uLitTime.value = t;
       backdrop.position.set(camera.position.x, 0, camera.position.z);
       updateTrees(camera);
       if (flag) {
@@ -567,6 +667,8 @@ function building(
   wall.offsetHSL(0, 0, (rng() - 0.5) * 0.05);
   const facade = b.inside ? B.facade : B.shop;
   const bay = workshop ? 4.6 : b.inside ? 3.3 : 3.0;
+  // Lit-window order (the aWind channel is free on buildings).
+  const seed = glowSeed(b);
 
   // Walk-through passages (OSM tunnel paths under the building): an opening at
   // ground level in each wall the path crosses, plastered sides and a ceiling.
@@ -665,10 +767,11 @@ function building(
       const u0 = bays * pc.t0;
       const u1 = bays * pc.t1;
       const vb = windows ? (yb - floor) / storeyH : yb / 3;
-      const ia = target.vert(new THREE.Vector3(pa[0], yb, pa[1]), n, u0, vb, 0.92, 0, wall);
-      const ib = target.vert(new THREE.Vector3(pa[0], top, pa[1]), n, u0, windows ? v1 : top / 3, 1, 0, wall);
-      const ic = target.vert(new THREE.Vector3(pb[0], top, pb[1]), n, u1, windows ? v1 : top / 3, 1, 0, wall);
-      const id = target.vert(new THREE.Vector3(pb[0], yb, pb[1]), n, u1, vb, 0.92, 0, wall);
+      const gs = windows ? seed : 0;
+      const ia = target.vert(new THREE.Vector3(pa[0], yb, pa[1]), n, u0, vb, 0.92, gs, wall);
+      const ib = target.vert(new THREE.Vector3(pa[0], top, pa[1]), n, u0, windows ? v1 : top / 3, 1, gs, wall);
+      const ic = target.vert(new THREE.Vector3(pb[0], top, pb[1]), n, u1, windows ? v1 : top / 3, 1, gs, wall);
+      const id = target.vert(new THREE.Vector3(pb[0], yb, pb[1]), n, u1, vb, 0.92, gs, wall);
       target.quad(ia, ib, ic, id);
       const segLen = len * (pc.t1 - pc.t0);
       if (pc.bottom === null) {
@@ -1347,10 +1450,37 @@ function standTiers(kit: Kit, ground: CampusGround, physics: PhysicsWorld): void
         const x = t.ox + t.ux * um + t.vx * vm;
         const z = t.oz + t.uz * um + t.vz * vm;
         if (steps.some((l) => l.pts.some((p, i) => i > 0 && segDist(x, z, l.pts[i - 1], p).d < 2.2))) continue;
+        // Under the pavilion: its own walls and podium take the place of the terraces.
+        if (ground.podiums.some((p) => p.t === t && pointInPoly(x, z, p.b.pts))) continue;
         kit.add('concrete', new THREE.BoxGeometry(du + 0.01, top - bottom, dv + 0.01), x, (top + bottom) / 2, z, ry);
         physics.addBox({ x, y: (top + bottom) / 2, z, hx: du / 2, hy: (top - bottom) / 2, hz: dv / 2, rotY: ry });
       }
     }
+  }
+  // The pavilion's podium: a concrete landing across its front at floor level, a step above the
+  // terrace it stands on, with a stone nosing, so it reads as a stage facing the ground.
+  for (const p of ground.podiums) {
+    const t = p.t;
+    const floor = (ground.padLevel(p.b) ?? 0) + 0.45;
+    const ry = Math.atan2(-t.uz, t.ux);
+    const us = p.b.pts.map(([x, z]) => (x - t.ox) * t.ux + (z - t.oz) * t.uz);
+    const u0 = Math.min(...us) - 0.6;
+    const u1 = Math.max(...us) + 0.6;
+    const depth = 2.2;
+    const bottom = t.lower - 0.3;
+    const um = (u0 + u1) / 2;
+    const vm = p.front - depth / 2 + 0.3;
+    const x = t.ox + t.ux * um + t.vx * vm;
+    const z = t.oz + t.uz * um + t.vz * vm;
+    kit.add('concrete', new THREE.BoxGeometry(u1 - u0, floor - bottom, depth), x, (floor + bottom) / 2, z, ry);
+    kit.add('stone', new THREE.BoxGeometry(u1 - u0 + 0.1, 0.08, 0.3), x - t.vx * (depth / 2 - 0.12), floor + 0.01, z - t.vz * (depth / 2 - 0.12), ry);
+    physics.addBox({ x, y: (floor + bottom) / 2, z, hx: (u1 - u0) / 2, hy: (floor - bottom) / 2, hz: depth / 2, rotY: ry });
+    // One step down in front, so no riser is taller than a terrace.
+    const sx = x - t.vx * (depth / 2 + 0.25);
+    const sz = z - t.vz * (depth / 2 + 0.25);
+    const stepTop = floor - 0.45;
+    kit.add('concrete', new THREE.BoxGeometry(u1 - u0, stepTop - bottom, 0.5), sx, (stepTop + bottom) / 2, sz, ry);
+    physics.addBox({ x: sx, y: (stepTop + bottom) / 2, z: sz, hx: (u1 - u0) / 2, hy: (stepTop - bottom) / 2, hz: 0.25, rotY: ry });
   }
 }
 
@@ -1479,7 +1609,7 @@ function intersect(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
 }
 
 /** The main gate: two pillars and an arch carrying the campus name, over the road from Lamachaur Marg. */
-function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: PhysicsWorld): void {
+function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: PhysicsWorld): GateSpot {
   // Find the campus road leaving the junction and orient the gate across it.
   let best: { x: number; z: number; ang: number; d: number } | null = null;
   for (const l of DATA.lines) {
@@ -1522,6 +1652,9 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
     sign.rotation.y = Math.atan2(nx, nz);
     group.add(sign);
   }
+  // Which way along the road is into campus (towards the middle of the map).
+  const into = Math.cos(ang) * -gx + Math.sin(ang) * -gz >= 0 ? 1 : -1;
+  return { x: gx, y, z: gz, heading: Math.atan2(Math.cos(ang) * into, Math.sin(ang) * into), span };
 }
 
 // ==================================================================== trees

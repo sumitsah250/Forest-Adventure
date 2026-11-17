@@ -25,18 +25,20 @@ export const GAMES: GameEntry[] = [
     href: 'campus.html?source=app',
     name: 'Campus Quest',
     icon: 'icons/campus-512.png',
-    tag: 'Adventure · Quiz',
-    blurb: 'Explore IOE Pashchimanchal Campus, Pokhara. Solve each department’s challenge and graduate.',
+    tag: 'Story · Go-kart · Puzzles',
+    blurb: 'Blackout at WRC: the campus AI has locked IOE Pashchimanchal. One night, sixteen missions and a go-kart called Kalki.',
     place: 'IOE Pashchimanchal Campus · Lamachaur, Pokhara',
-    intro: 'Your first day as an engineering student. Explore the real campus, find each department, solve its challenge and earn your degree — ten levels from Admission Day to Convocation.',
+    intro: 'The night before the tech fest, the campus AI locks every gate and seizes the exam server. Drive Kalki, crack puzzles, dodge drones and find who did it before the paper leaks at 9 AM.',
     // Title-screen aerial view; regenerate with `npm run overview`.
     cover: 'images/campus-overview.jpg',
     assets: [
       'assets/models/player/sumit_character.glb',
-      // Quest props placed during levels (src/campus/quest.ts).
+      // Mission props (src/campus/actors.ts).
       'assets/models/binder_notebook/',
       'assets/models/metal_toolbox/',
       'assets/models/power_box_01/',
+      'assets/models/signal_flashlight/',
+      'assets/models/metal_jerrycan_green/',
       'assets/foliage/',
       'assets/textures/pine_bark/',
       'assets/textures/bark_brown_02/',

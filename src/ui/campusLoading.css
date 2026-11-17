@@ -1,0 +1,191 @@
+/* Campus Quest loading screen ("restoring power"). Only transform and opacity animate, so
+   motion stays smooth while the main thread is busy building the world. */
+
+.lc {
+  --lc-ink: #f4f1e8;
+  --lc-dim: rgba(244, 241, 232, 0.66);
+  --lc-faint: rgba(244, 241, 232, 0.14);
+  --lc-gold: #f2d27a;
+  --lc-glow: rgba(242, 210, 122, 0.55);
+  --lc-warm: #ffd68a;
+  --lc-cool: #d6e8ff;
+  --lc-display: "Bahnschrift", "DIN Condensed", "DIN Alternate", "Roboto Condensed", "Arial Narrow", sans-serif-condensed, var(--font);
+  position: fixed; inset: 0; z-index: 60; overflow: hidden; isolation: isolate;
+  color: var(--lc-ink); background: #050a17; cursor: default;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+@media (hover: hover) and (pointer: fine) { .lc { cursor: crosshair; } }
+
+/* ------------------------------------------------------------ sky */
+.lc__sky { position: absolute; inset: 0; background: linear-gradient(180deg, #03060f 0%, #08122a 38%, #13234a 70%, #233766 100%); }
+.lc__stars {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%;
+  animation: lc-twinkle 4.5s ease-in-out infinite alternate;
+}
+.lc__moon {
+  position: absolute; right: 6vw; top: 30vh; width: clamp(34px, 4vw, 56px); aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 36% 34%, #fffdf2 0%, #ece6cf 60%, #c9c2a8 100%);
+  box-shadow: 0 0 36px 10px rgba(220, 228, 255, 0.2), 0 0 160px 60px rgba(160, 180, 255, 0.08);
+}
+.lc__peaks { position: absolute; left: 0; bottom: 22vh; width: 100%; height: 40vh; display: block; opacity: 0.9; animation: lc-drift 60s ease-in-out infinite alternate; }
+.lc__haze {
+  position: absolute; left: 0; right: 0; bottom: 18vh; height: 22vh;
+  background: linear-gradient(180deg, transparent, rgba(60, 84, 140, 0.32) 60%, rgba(36, 52, 92, 0.5));
+}
+
+/* The town beyond the wall still has power: warm specks along the far hillside. */
+.lc__town { position: absolute; left: 0; right: 0; bottom: 21vh; height: 6vh; }
+.lc__town i {
+  position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #ffcf7a;
+  box-shadow: 0 0 6px 1px rgba(255, 200, 110, 0.6); animation: lc-flick 6s ease-in-out var(--o) infinite;
+}
+
+/* ------------------------------------------------------------ the campus */
+.lc__skyline { position: absolute; left: 0; right: 0; bottom: 6vh; height: 34vh; }
+.lc__b {
+  position: absolute; bottom: 0; padding: 1.4vh 0.5vw 0; box-sizing: border-box;
+  background: linear-gradient(180deg, #111b34, #0a1226); border-top: 2px solid #1d2a4b;
+  box-shadow: inset 0 0 0 1px rgba(120, 150, 220, 0.05);
+}
+.lc__w { display: grid; gap: 0.9vh 0.5vw; height: calc(100% - 2.4vh); align-content: start; overflow: hidden; }
+.lc__w i { display: block; height: 2.4vh; border-radius: 1px; background: rgba(130, 150, 200, 0.07); position: relative; }
+/* Lit glass is a pseudo-element faded in with opacity, so switching on stays cheap. */
+.lc__w i::after {
+  content: ''; position: absolute; inset: 0; border-radius: 1px; opacity: 0;
+  background: linear-gradient(180deg, var(--lc-warm), #e9a54a); box-shadow: 0 0 8px rgba(255, 196, 110, 0.55);
+}
+.lc__w i.c::after { background: linear-gradient(180deg, #f4f9ff, var(--lc-cool)); box-shadow: 0 0 8px rgba(190, 215, 255, 0.5); }
+.lc__w i.on::after { animation: lc-on 0.5s steps(1, end) forwards; }
+.lc--live .lc__w i::after { animation: lc-on 0.4s steps(1, end) forwards; }
+.lc__b.flip .lc__w i::after { animation: lc-flip 1.3s ease-out; }
+.lc__b.flip .lc__w i.on::after { animation: none; opacity: 1; }
+
+.lc__mast { position: absolute; left: 50%; bottom: 100%; width: 2px; height: 6vh; background: #1d2a4b; }
+.lc__mast i {
+  position: absolute; left: 50%; top: -3px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%;
+  background: #ff3b3b; box-shadow: 0 0 10px 3px rgba(255, 40, 40, 0.6); animation: lc-blink 1.6s steps(1, end) infinite;
+}
+.lc__sign {
+  position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%);
+  font: 800 clamp(9px, 1.1vw, 13px) var(--lc-display); letter-spacing: 0.24em; padding: 2px 6px 2px 8px;
+  color: rgba(140, 170, 230, 0.3); border: 1px solid rgba(140, 170, 230, 0.18); border-radius: 2px;
+}
+.lc--live .lc__sign { color: #9fe7ff; border-color: rgba(159, 231, 255, 0.6); text-shadow: 0 0 8px rgba(120, 220, 255, 0.9); }
+.lc__ground { position: absolute; left: 0; right: 0; bottom: 0; height: 6vh; background: linear-gradient(180deg, #0a1326, #050a17); }
+
+/* ------------------------------------------------------------ title block */
+.lc__center {
+  position: absolute; left: 0; right: 0; top: max(10vh, env(safe-area-inset-top, 0px) + 18px);
+  display: grid; justify-items: center; padding: 0 16px; text-align: center; z-index: 2;
+  transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.6s ease;
+}
+.lc__studio {
+  display: flex; align-items: center; gap: 14px; font-size: 11px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--lc-dim);
+  animation: lc-fade 1s ease 0.1s both;
+}
+.lc__studio::before, .lc__studio::after { content: ''; width: 34px; height: 1px; background: currentColor; opacity: 0.6; }
+.lc__title {
+  margin: 12px 0 0; display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.26em;
+  font-family: var(--lc-display); font-weight: 700; font-stretch: condensed;
+  font-size: clamp(46px, min(12.5vw, 16vh), 148px); line-height: 0.9; letter-spacing: 0.05em;
+  text-shadow: 0 6px 34px rgba(0, 0, 0, 0.6);
+}
+.lc__word { display: inline-flex; }
+.lc__word span { display: inline-block; animation: lc-rise 0.9s cubic-bezier(0.2, 0.8, 0.2, 1.15) calc(0.2s + var(--i) * 55ms) both; }
+.lc__word--accent { color: var(--lc-gold); text-shadow: 0 0 36px var(--lc-glow), 0 6px 30px rgba(0, 0, 0, 0.5); }
+
+/* A neon tube that struggles to come on, then holds. */
+.lc__neon {
+  margin-top: 14px; padding: 5px 16px 6px 20px; border: 1.5px solid rgba(255, 120, 90, 0.75); border-radius: 6px;
+  font: 700 clamp(13px, 1.6vw, 18px) var(--lc-display); letter-spacing: 0.42em; text-transform: uppercase;
+  color: #ffb39a; text-shadow: 0 0 6px rgba(255, 90, 60, 0.9), 0 0 18px rgba(255, 70, 40, 0.6);
+  box-shadow: 0 0 14px rgba(255, 80, 50, 0.35), inset 0 0 10px rgba(255, 80, 50, 0.25);
+  animation: lc-neon 3.2s linear 0.9s both;
+}
+.lc--live .lc__neon { animation: none; opacity: 1; }
+.lc__place { margin: 14px 0 0; font-size: clamp(12.5px, 1.4vw, 15px); letter-spacing: 0.06em; color: var(--lc-dim); animation: lc-fade 1.2s ease 1.2s both; }
+
+/* ------------------------------------------------------------ power meter */
+.lc__foot {
+  position: absolute; left: 50%; bottom: max(20px, env(safe-area-inset-bottom, 0px) + 12px); z-index: 2;
+  width: min(600px, calc(100% - 32px)); transform: translateX(-50%);
+  padding: 14px 16px 12px; border-radius: 14px; background: rgba(5, 10, 23, 0.72); border: 1px solid rgba(242, 210, 122, 0.14);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  animation: lc-fade 0.9s ease 0.5s both; transition: opacity 0.5s ease;
+}
+.lc__meta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.lc__bolt { color: var(--lc-gold); font-size: 15px; text-shadow: 0 0 10px var(--lc-glow); animation: lc-blink 1.4s steps(1, end) infinite; }
+.lc__status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--lc-dim); }
+.lc__pct { font: 700 28px/1 var(--lc-display); font-variant-numeric: tabular-nums; }
+.lc__pct small { font-size: 0.5em; margin-left: 2px; color: var(--lc-gold); }
+.lc__meter { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; height: 12px; }
+.lc__meter span { position: relative; border-radius: 2px; background: var(--lc-faint); overflow: hidden; }
+.lc__meter span::after {
+  content: ''; position: absolute; inset: 0; opacity: 0;
+  background: linear-gradient(180deg, #ffe7a6, var(--lc-gold) 55%, #d9a63c); box-shadow: 0 0 8px var(--lc-glow);
+  transition: opacity 0.25s ease;
+}
+.lc__meter span.on::after { opacity: 1; }
+.lc__meter span.next::after { animation: lc-pulse 0.9s ease-in-out infinite alternate; }
+.lc__tip { margin: 12px 0 0; font-size: 13px; line-height: 1.45; color: var(--lc-dim); min-height: 2.9em; transition: opacity 0.35s ease, transform 0.35s ease; }
+.lc__tip.out { opacity: 0; transform: translateY(4px); }
+.lc__tip b { display: inline-block; margin-right: 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--lc-gold); }
+
+.lc__hint {
+  position: absolute; right: 18px; top: max(16px, env(safe-area-inset-top, 0px) + 10px); z-index: 2;
+  font-size: 11px; letter-spacing: 0.1em; color: var(--lc-dim); animation: lc-fade 1s ease 2.6s both; transition: opacity 0.4s;
+}
+.lc.tapped .lc__hint { opacity: 0; animation: none; }
+
+/* ------------------------------------------------------------ states */
+.lc--error .lc__status { color: #f0a080; white-space: normal; }
+.lc--error .lc__bolt { animation: none; color: #f0a080; }
+/* Ready: a quick white surge across the sky as everything comes on. */
+.lc__sky::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 100%, rgba(255, 220, 150, 0.35), transparent 65%); opacity: 0; }
+.lc--live .lc__sky::after { animation: lc-surge 1s ease-out forwards; }
+.lc--done { opacity: 0; transition: opacity 0.9s ease 0.1s; pointer-events: none; }
+.lc--done .lc__center { transform: scale(1.05) translateY(-10px); opacity: 0; }
+.lc--done .lc__foot { opacity: 0; }
+
+/* ------------------------------------------------------------ layout */
+@media (max-width: 560px) {
+  .lc__hint { left: 0; right: 0; text-align: center; }
+  .lc__center { top: max(12vh, env(safe-area-inset-top, 0px) + 40px); }
+  .lc__studio::before, .lc__studio::after { width: 18px; }
+  .lc__neon { letter-spacing: 0.3em; }
+  .lc__meter { gap: 2px; height: 10px; }
+  /* Tall phones: lift the whole scene so the power meter sits on the ground, not over the campus. */
+  .lc__skyline { height: 25vh; bottom: 19vh; }
+  .lc__ground { height: 19vh; }
+  .lc__town { bottom: 34vh; }
+  .lc__haze { bottom: 31vh; }
+  .lc__peaks { bottom: 35vh; height: 30vh; }
+  .lc__moon { top: 6vh; right: 7vw; }
+}
+@media (max-height: 480px) {
+  .lc__tip, .lc__place { display: none; }
+  .lc__center { top: max(5vh, env(safe-area-inset-top, 0px) + 8px); }
+  .lc__neon { margin-top: 8px; }
+  .lc__skyline { height: 40vh; bottom: 4vh; }
+  .lc__foot { padding: 10px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc *, .lc *::before, .lc *::after { animation-duration: 0.01s !important; animation-iteration-count: 1 !important; transition-duration: 0.01s !important; }
+}
+
+/* ------------------------------------------------------------ keyframes */
+@keyframes lc-rise { from { opacity: 0; transform: translateY(0.45em) scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes lc-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes lc-twinkle { from { opacity: 0.55; } to { opacity: 1; } }
+@keyframes lc-drift { from { transform: translateX(-1%) scaleX(1.03); } to { transform: translateX(1%) scaleX(1.03); } }
+@keyframes lc-flick { 0%, 100% { opacity: 0.9; } 48% { opacity: 0.55; } 52% { opacity: 1; } }
+@keyframes lc-blink { 0% { opacity: 1; } 50% { opacity: 0.15; } }
+@keyframes lc-pulse { from { opacity: 0.15; } to { opacity: 0.7; } }
+/* A light switching on: a stutter of the tube, then on. */
+@keyframes lc-on { 0% { opacity: 0.7; } 20% { opacity: 0.15; } 40% { opacity: 1; } 60% { opacity: 0.4; } 80%, 100% { opacity: 1; } }
+@keyframes lc-flip { 0% { opacity: 1; } 70% { opacity: 0.9; } 100% { opacity: 0; } }
+@keyframes lc-surge { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0.35; } }
+@keyframes lc-neon {
+  0%, 8% { opacity: 0.08; } 9% { opacity: 1; } 11% { opacity: 0.1; } 22% { opacity: 0.1; } 23% { opacity: 1; } 25% { opacity: 0.3; }
+  27% { opacity: 1; } 40% { opacity: 1; } 41% { opacity: 0.4; } 43%, 100% { opacity: 1; }
+}

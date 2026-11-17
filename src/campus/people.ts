@@ -5,14 +5,29 @@
 import * as THREE from 'three';
 import type { Outfit } from '../character/humanoid.ts';
 import { Person } from '../character/person.ts';
-import type { PhysicsWorld } from '../physics/physics.ts';
+import { GROUP, groups, type PhysicsWorld } from '../physics/physics.ts';
+import type RAPIER from '@dimforge/rapier3d-compat';
+
+/**
+ * Collision bit carried by the floor probe. People's collision posts leave it out of their
+ * filter, so the probe passes through them (Rapier tests membership against filter both ways),
+ * while players and Kalki still bump into them.
+ */
+const PROBE = 0x0080;
+
+/** Makes a person's collision post invisible to the floor probe. */
+export function postGroups(c: RAPIER.Collider): RAPIER.Collider {
+  c.setCollisionGroups(groups(GROUP.STATIC, 0xffff & ~PROBE));
+  return c;
+}
 import { DATA, pointInPoly, type Pt } from './geo.ts';
 import type { CampusGround } from './ground.ts';
 import { mulberry32, pick } from '../world/rng.ts';
 
-export { Person };
+import { STAFF, base } from './story/outfits.ts';
 
-const base = { headwearColor: '#000', beard: false, uniform: false, vest: null } as const;
+export { Person, STAFF };
+
 
 export const STUDENT: Outfit = {
   ...base, id: 'cq-player', skin: '#a8724f', hair: '#16110d', top: '#2f4f6f', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim',
@@ -32,19 +47,34 @@ const STUDENTS: Outfit[] = [
   { ...base, id: 'cq-s10', skin: '#9c6a4c', hair: '#120e0b', top: '#2f4f3f', topPattern: 'plaid', trousers: '#2c3646', trouserPattern: 'denim', boots: '#1e1e1e', headwear: 'none', backpack: '#2a2a2e', hairStyle: 'textured', beard: true },
 ];
 
-export const STAFF: Record<string, Outfit> = {
-  suitGrey: { ...base, id: 'cq-p1', skin: '#a8724f', hair: '#2a2420', top: '#4a4d52', topPattern: 'twill', trousers: '#3a3c40', trouserPattern: 'twill', boots: '#121212', headwear: 'none', backpack: null, suit: true },
-  suitBrown: { ...base, id: 'cq-p2', skin: '#b58262', hair: '#6a6660', top: '#5a4632', topPattern: 'twill', trousers: '#3f3326', trouserPattern: 'twill', boots: '#1a1410', headwear: 'none', backpack: null, suit: true, beard: true },
-  suitNavy: { ...base, id: 'cq-p3', skin: '#9c6a4c', hair: '#141110', top: '#23324f', topPattern: 'twill', trousers: '#23324f', trouserPattern: 'twill', boots: '#101010', headwear: 'none', backpack: null, suit: true },
-  coat: { ...base, id: 'cq-p4', skin: '#c08d6c', hair: '#1a1410', top: '#e9e9e4', topPattern: 'canvas', trousers: '#3a3c40', trouserPattern: 'twill', boots: '#1a1a1a', headwear: 'none', backpack: null },
-  officer: { ...base, id: 'cq-p6', skin: '#b58262', hair: '#120e0c', top: '#7a2f3a', topPattern: 'knit', trousers: '#2f2a30', trouserPattern: 'twill', boots: '#1a1414', headwear: 'none', backpack: null, female: true, hairStyle: 'bun' },
-  librarian: { ...base, id: 'cq-p7', skin: '#a8724f', hair: '#16110d', top: '#e6e3da', topPattern: 'canvas', trousers: '#3a3c48', trouserPattern: 'twill', boots: '#1a1a1a', headwear: 'none', backpack: null, female: true, hairStyle: 'ponytail' },
-  sweater: { ...base, id: 'cq-p5', skin: '#a77352', hair: '#555049', top: '#6a2f3a', topPattern: 'knit', trousers: '#4a4a40', trouserPattern: 'twill', boots: '#2a2018', headwear: 'none', backpack: null, beard: true },
-};
+
+/**
+ * Where a person's feet go: the terrain, or anything built on it within reach (entrance
+ * steps and landings, stand terraces, the podium). A short ray down against static scenery,
+ * skipping people's own posts (by collision group: no per-collider callback, so it stays
+ * cheap with every person's feet asking every frame). Only floor-like hits count, so a ray
+ * that starts inside a wall or a tree trunk falls back to the ground.
+ */
+export function walkSurface(ground: CampusGround, physics: PhysicsWorld): { heightAt(x: number, z: number): number } {
+  const R = physics.R;
+  const ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+  const filter = groups(PROBE, GROUP.STATIC);
+  const REACH = 2.6;
+  return {
+    heightAt(x: number, z: number): number {
+      const base = ground.standAt(x, z);
+      ray.origin = { x, y: base + REACH, z };
+      const hit = physics.world.castRayAndGetNormal(ray, REACH + 0.6, true, undefined, filter);
+      if (!hit || hit.timeOfImpact < 1e-3 || hit.normal.y < 0.7) return base;
+      return Math.max(base, base + REACH - hit.timeOfImpact);
+    },
+  };
+}
 
 /** Students standing in small groups on lawns and walking campus footpaths. */
 export function populate(scene: THREE.Scene, ground: CampusGround, physics: PhysicsWorld, density: number): Person[] {
   const rng = mulberry32(2025);
+  const surface = walkSurface(ground, physics);
   const people: Person[] = [];
   const spots = DATA.areas.filter((a) => (a.kind === 'park' || a.kind === 'plaza') && a.name && pointInPoly(a.pts[0][0], a.pts[0][1], DATA.boundary));
   const groups = Math.round(7 * density);
@@ -60,14 +90,14 @@ export function populate(scene: THREE.Scene, ground: CampusGround, physics: Phys
       const x = cx + Math.cos(ang) * 0.9;
       const z = cz + Math.sin(ang) * 0.9;
       // Face the middle of the group.
-      people.push(new Person(scene, pick(rng, STUDENTS), ground, physics, x, z, Math.atan2(cx - x, cz - z)));
+      people.push(new Person(scene, pick(rng, STUDENTS), surface, physics, x, z, Math.atan2(cx - x, cz - z)));
     }
   }
   const walks = DATA.lines.filter((l) => l.kind === 'footway' && l.pts.length >= 3 && pointInPoly(l.pts[0][0], l.pts[0][1], DATA.boundary) && lineLength(l.pts) > 35);
   const walkers = Math.round(10 * density);
   for (let i = 0; i < walkers && walks.length; i += 1) {
     const l = walks[Math.floor(rng() * walks.length)];
-    const p = new Person(scene, pick(rng, STUDENTS), ground, physics, l.pts[0][0], l.pts[0][1], 0);
+    const p = new Person(scene, pick(rng, STUDENTS), surface, physics, l.pts[0][0], l.pts[0][1], 0);
     // Offset sideways a little so two walkers on one path do not overlap.
     const off = (rng() - 0.5) * 1.2;
     p.route = l.pts.map(([x, z], k) => {

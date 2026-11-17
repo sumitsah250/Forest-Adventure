@@ -224,7 +224,20 @@ export interface ClipState {
 }
 
 /** Fastest playback of the walk/run cycles, relative to their own pace. */
-const MAX_TEMPO = 2;
+const MAX_TEMPO = 1.6;
+/**
+ * Playback tempo grows more slowly than speed (speed ratio ^ TEMPO_EXP): a person
+ * walking faster takes longer steps as well as quicker ones, so a little stride
+ * stretch (slight foot slip) reads far more naturally than a sped-up, frantic cycle.
+ */
+const TEMPO_EXP = 0.6;
+/**
+ * Above walking pace the procedural gait (planted feet, stride that grows with speed)
+ * takes over from the clips: the model's own Run is an in-place jog whose short stride
+ * can't keep up with a real run without skating or flailing.
+ */
+const PROC_FROM = 1.85;
+const PROC_FULL = 2.9;
 
 const smoothstep = (x: number) => {
   const t = THREE.MathUtils.clamp(x, 0, 1);
@@ -326,21 +339,22 @@ export class PlayerClips {
   }
 
   update(dt: number, s: ClipState): void {
-    this.weight = THREE.MathUtils.damp(this.weight, s.active ? 1 : 0, s.active ? 7 : 10, dt);
-    if (this.weight < 0.002) return;
-    // Locomotion weights: idle -> walk -> run by speed.
     const v = s.speed;
-    const move = smoothstep(v / 0.6);
-    const runF = this.run ? smoothstep((v - this.walkSpeed) / Math.max(0.1, this.runSpeed - this.walkSpeed)) : 0;
+    // Hand over to the procedural gait at running pace (kept while airborne so a jump keeps its clip).
+    const proc = s.grounded ? smoothstep((v - PROC_FROM) / (PROC_FULL - PROC_FROM)) : 0;
+    const want = s.active ? 1 - proc : 0;
+    this.weight = THREE.MathUtils.damp(this.weight, want, want > this.weight ? 6 : 8, dt);
+    if (this.weight < 0.002) return;
+    // Locomotion weights: idle -> walk by speed (the run clip only covers the gap up to the procedural run).
+    const move = smoothstep(v / 0.5);
+    const runF = this.run ? 0.5 * smoothstep((v - this.walkSpeed * 1.5) / Math.max(0.1, PROC_FULL - this.walkSpeed * 1.5)) : 0;
     // One shared cycle phase for walk and run, advanced at the rate that matches the speed.
     if (move > 0.01) {
       const wDur = this.walk?.getClip().duration ?? 1;
       const rDur = this.run?.getClip().duration ?? wDur;
-      // Tempo follows the speed so planted feet stay put, but never more than
-      // MAX_TEMPO x the clip's own pace (past that the legs look frantic and a
-      // little foot slide reads better).
-      const rateW = Math.min(v / this.walkSpeed, MAX_TEMPO) / wDur;
-      const rateR = Math.min(v / this.runSpeed, MAX_TEMPO) / rDur;
+      const tempo = (ratio: number) => Math.min(MAX_TEMPO, Math.pow(Math.max(ratio, 0.35), TEMPO_EXP));
+      const rateW = tempo(v / this.walkSpeed) / wDur;
+      const rateR = tempo(v / this.runSpeed) / rDur;
       this.phase = (this.phase + dt * THREE.MathUtils.lerp(rateW, rateR, runF)) % 1;
     }
     this.idleT += dt;

@@ -39,7 +39,10 @@ hanging_industrial_lamp, wall_clock, metal_toolbox, worn_metal_rack, trashbag, w
 - Extra building footprints (buildings OpenStreetMap does not have yet): Microsoft Global ML Building
   Footprints, © Microsoft, Open Database License (ODbL 1.0), merged by `scripts/merge-ms-buildings.mjs`.
 - Institute of Engineering, Tribhuvan University and Pashchimanchal Campus are real institutions; the game is an
-  unofficial fan project. Every host and student in Campus Quest is fictional.
+  unofficial fan project. The story of Campus Quest is fictional. The Campus Chief, department heads and the
+  library chief appear by their real names (from the campus's published Key Officials list) as a tribute, only
+  as friendly helpers; the culprit, the suspects and every student are invented. The campus has not endorsed
+  the game.
 
 ## Sound
 

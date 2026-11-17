@@ -227,37 +227,42 @@ export class Atmosphere {
   }
 
   /** Builds the image-based light from the sky plus a dark forest horizon. */
+  /** Kept for the session: a new generator recompiles its blur shaders every time (a long stall). */
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envScene: THREE.Scene | null = null;
+
   buildEnvironment(renderer: THREE.WebGLRenderer, scene: THREE.Scene): void {
-    const envScene = new THREE.Scene();
-    const sky = this.sky.clone();
-    envScene.add(sky);
-    // Surrounding forest: dark band around the horizon and dim ground below.
-    const ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(500, 500, 220, 32, 1, true),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color('#2a3220'), side: THREE.BackSide, fog: false }),
-    );
-    ring.position.y = -60;
-    envScene.add(ring);
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(520, 32),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color('#3d3222'), fog: false }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -40;
-    envScene.add(ground);
+    if (!this.envScene) {
+      const envScene = new THREE.Scene();
+      // The sky clone shares its material (and uniforms) with the real sky, so it follows every change.
+      envScene.add(this.sky.clone());
+      // Surrounding forest: dark band around the horizon and dim ground below.
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(500, 500, 220, 32, 1, true),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color('#2a3220'), side: THREE.BackSide, fog: false }),
+      );
+      ring.position.y = -60;
+      envScene.add(ring);
+      const ground = new THREE.Mesh(
+        new THREE.CircleGeometry(520, 32),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color('#3d3222'), fog: false }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -40;
+      envScene.add(ground);
+      this.envScene = envScene;
+    }
     // Ambient light comes from a softened sky: the vivid blue zenith is for the eye,
     // but as fill light it would turn shaded forest floor grey-blue.
     const zenith = this.state.zenith.clone();
     this.state.zenith.lerp(this.state.horizon, 0.55).multiply(new THREE.Color(1.04, 1.0, 0.92));
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    this.envTarget?.dispose();
-    this.envTarget = pmrem.fromScene(envScene, 0.02);
+    this.pmrem ??= new THREE.PMREMGenerator(renderer);
+    const old = this.envTarget;
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0.02);
+    old?.dispose();
     this.state.zenith.copy(zenith);
     scene.environment = this.envTarget.texture;
     scene.environmentIntensity = this.state.envIntensity;
-    pmrem.dispose();
-    ring.geometry.dispose();
-    ground.geometry.dispose();
   }
 
   /** Blend towards another state (t in 0..1) — used as the story moves towards dusk. */

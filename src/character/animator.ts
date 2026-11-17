@@ -56,6 +56,8 @@ export interface AnimInput {
   pose: 'normal' | 'sit' | 'surrender' | 'down';
   /** Upper-body flinch from being hit (0..1). */
   flinch: number;
+  /** Sitting: ankle height and reach forward in character space (default: a chair, feet under the knees). */
+  sitFeet?: { y: number; z: number };
 }
 
 export type GroundFn = (x: number, z: number, fromY: number) => number;
@@ -119,6 +121,7 @@ export class Animator {
   private headYaw = 0;
   private headPitch = 0;
   private poseBlend = { sit: 0, surrender: 0, down: 0 };
+  private sitFeet: { y: number; z: number } | null = null;
   private initialised = false;
   /** Hands were on a weapon in the last update (arm IK active). */
   handsActive = false;
@@ -253,6 +256,7 @@ export class Animator {
     this.invYaw.setFromAxisAngle(UP, -s.facing);
     this.rig.root.position.copy(s.pos);
     this.rig.root.rotation.set(0, s.facing, 0);
+    this.sitFeet = s.sitFeet ?? null;
     this.breathe += dt;
     for (const k of ['sit', 'surrender', 'down'] as const) this.poseBlend[k] = THREE.MathUtils.damp(this.poseBlend[k], s.pose === k ? 1 : 0, 5, dt);
 
@@ -264,7 +268,9 @@ export class Animator {
     this.prevVel.copy(s.vel);
     acc.applyQuaternion(this.invYaw);
     const localVel = _v3.copy(hv).applyQuaternion(this.invYaw);
-    const leanF = THREE.MathUtils.clamp(localVel.z * 0.024 + acc.z * 0.012, -0.12, 0.3) * (1 - s.aimAmount * 0.6);
+    // Runners lean forward from the ankles (more the faster they go); walkers stay upright.
+    const runLean = smooth((this.speedS - 2.9) / 1.5) * 0.1;
+    const leanF = THREE.MathUtils.clamp(localVel.z * 0.024 + acc.z * 0.012 + runLean, -0.12, 0.34) * (1 - s.aimAmount * 0.6);
     const leanS = THREE.MathUtils.clamp(-acc.x * 0.01, -0.08, 0.08);
     this.lean.x = THREE.MathUtils.damp(this.lean.x, leanF, 6, dt);
     this.lean.y = THREE.MathUtils.damp(this.lean.y, leanS, 6, dt);
@@ -276,7 +282,9 @@ export class Animator {
     const run = smooth((gs - 2.9) / 1.5);
     const duty = THREE.MathUtils.lerp(0.62, 0.36, run);
     // Walk steps grow more slowly with speed than run strides (no lunging).
-    const stride = Math.min(3.1, THREE.MathUtils.lerp(0.9 + 0.36 * gs, 0.75 + 0.45 * gs, run));
+    // Running strides grow a little less with speed (quicker cadence instead), which keeps
+    // the legs under the body rather than lunging into a split.
+    const stride = Math.min(2.45, THREE.MathUtils.lerp(0.9 + 0.36 * gs, 0.85 + 0.3 * gs, run));
     if (!s.grounded) this.air += dt;
     else {
       if (this.air > 0.3) this.landVel -= Math.min(1, this.air * 1.4) * 1.6;
@@ -299,9 +307,9 @@ export class Animator {
       if (f.swing) {
         // On the frame the cycle wraps into stance the swing is complete (sw = 1).
         const sw = inSwing ? THREE.MathUtils.clamp((local - duty) / (1 - duty), 0, 1) : 1;
-        // Land ahead so that mid-stance falls under the hip.
+        // Land ahead so that mid-stance falls under the hip (runners land closer under the body).
         const remaining = (1 - sw) * swingTime;
-        const lead = remaining + (duty / Math.max(cadence, 0.5)) * 0.5;
+        const lead = remaining + (duty / Math.max(cadence, 0.5)) * (0.5 - 0.18 * run);
         this.idealFoot(f.side, _v2.copy(s.pos).addScaledVector(hv, speed > 0.15 ? lead : 0), s.facing, f.target);
         if (!inSwing || sw >= 0.999) {
           f.swing = false;
@@ -311,7 +319,10 @@ export class Animator {
         } else {
           const e = smooth(sw);
           f.cur.lerpVectors(f.from, f.target, e);
-          const arc = (0.07 + 0.12 * run) * Math.sin(sw * Math.PI) + Math.max(0, f.target.y - f.from.y) * Math.sin(sw * Math.PI * 0.5) * 0.4;
+          // Running: the heel comes up a little early in the swing, but the foot recovers low and
+          // close under the hip (a big back-kick reads as a cartoon sprint).
+          const swArc = Math.pow(sw, 1 - 0.15 * run);
+          const arc = (0.07 + 0.11 * run) * Math.sin(swArc * Math.PI) + Math.max(0, f.target.y - f.from.y) * Math.sin(sw * Math.PI * 0.5) * 0.4;
           f.cur.y += arc;
           f.lift = Math.sin(sw * Math.PI);
           f.heel = sw < 0.5 ? -0.45 * (1 - sw * 2) : 0.25 * Math.sin((sw - 0.5) * Math.PI * 2);
@@ -436,7 +447,7 @@ export class Animator {
     // Pose overrides: sitting (thighs forward) and kneeling.
     if (this.poseBlend.sit > 0.01) {
       const seatKnee = new THREE.Vector3(0.11 * f.side, 0.55, 0.45);
-      const seatAnkle = new THREE.Vector3(0.12 * f.side, 0.12, 0.52);
+      const seatAnkle = new THREE.Vector3(0.12 * f.side, this.sitFeet?.y ?? 0.12, this.sitFeet?.z ?? 0.52);
       ankle.lerp(seatAnkle, this.poseBlend.sit);
       void seatKnee;
     }
@@ -508,7 +519,7 @@ export class Animator {
   // ------------------------------------------------------------ arms
 
   private swingArms(speed: number, run: number, s: AnimInput): void {
-    const amp = Math.min(1, speed / 1.6) * (0.35 + 0.45 * run) * (1 - s.crouch * 0.5);
+    const amp = Math.min(1, speed / 1.6) * (0.3 + 0.28 * run) * (1 - s.crouch * 0.5);
     for (const side of [1, -1] as const) {
       const L = side > 0 ? '.L' : '.R';
       const upper = `upperArm${L}` as BoneName;
@@ -517,10 +528,11 @@ export class Animator {
       // Arm swings opposite to the same-side leg: furthest back as that foot lands.
       const swing = -Math.cos((this.phase + (side > 0 ? 0 : 0.5)) * Math.PI * 2) * amp;
       const chestQ = this.J('chest').q;
-      const abduct = 0.1 + 0.06 * run;
+      const abduct = 0.1 + 0.03 * run;
       const upperQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-swing - 0.05 * run, 0, abduct * side, 'XYZ')).premultiply(chestQ);
       this.setRot(upper, upperQ);
-      const elbow = 0.18 + 0.9 * run + Math.max(0, swing) * 0.4 + s.crouch * 0.3;
+      // Running arms: elbows near a right angle, hands pumping between hip and chest.
+      const elbow = 0.18 + 1.12 * run + Math.max(0, swing) * 0.3 * (1 - run * 0.5) + s.crouch * 0.3;
       this.setRot(fore, new THREE.Quaternion().setFromEuler(new THREE.Euler(-elbow, 0, 0)).premultiply(upperQ));
       this.setRot(hand, new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12, 0.15 * side, 0)).premultiply(this.J(fore).q));
     }

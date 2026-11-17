@@ -55,7 +55,7 @@ add the repository (GitHub App for a private repo), Build Pack *Dockerfile* or *
 ## Campus Quest: IOE Pashchimanchal Campus, Pokhara
 
 A second game in the same engine: a walkable, true-to-scale model of the Institute of Engineering,
-Pashchimanchal Campus (Lamachaur, Pokhara), with a ten-level quiz adventure. Open
+Pashchimanchal Campus (Lamachaur, Pokhara), with a sixteen-mission story, *Blackout at WRC*. Open
 http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's title screen).
 
 - **The map is real.** Every building footprint, road, footpath, lawn, sports ground, tree, bench, lamp and
@@ -67,15 +67,27 @@ http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's
   be entered: three floors of departments, classrooms and labs. The
   surrounding Lamachaur neighbourhood is included, and the Annapurna range with Machhapuchhre stands on the
   northern horizon.
-- **Ten levels.** Admission Day at the Administration Block, then each department in turn: Applied Science,
-  the WRC Library (find three missing books around campus), Civil (fetch your 28-day concrete cube from the
-  Civil Lab), Electrical (reset the breaker at the Power House), Electronics & Computer (find the lost pen
-  drive), Mechanical (tools from the workshops), Geomatics (a fix at the GNSS test station), the timed Final
-  Exam, and Convocation at the WRC Auditorium.
-- **Quizzes.** Engineering questions per department (options shuffled each time), three lives per test, a
-  short explanation after every answer, streak bonuses, and a results screen with a TU-style division.
+- **Blackout at WRC** (`src/campus/story.ts`). The night before the tech fest, the campus AI MITRA locks
+  every gate and seizes the exam server. Sixteen missions from dusk (6:52 PM) through a moonlit night to
+  sunrise: collect evidence against the clock, sneak past searchlight drones, chase a courier drone, solve
+  puzzles (breaker switches, keypad codes, timing gauges, a signal tuner, C debugging, pattern locks), crack
+  riddle hunts (a riddle about a real campus place, no marker until the hints), and name the culprit.
+- **Cinematic** (`src/campus/cinema.ts`, `fx.ts`): a letterboxed fly-in with a title card for every mission,
+  over-the-shoulder conversations, a victory orbit, slow motion on big moments, monsoon rain with lightning
+  and thunder through the night, and fireworks at the end.
+- **Kalki** (`src/campus/kart.ts`), the Automobile Club's go-kart: rear drive on the shared ray-cast
+  vehicle physics, the driver seated with hands on the wheel, **Shift** boost, **Space** + turn to drift
+  (release for a mini-turbo), stunt humps on the ring road (`ramps.ts`) for air time, **K** calls it to you.
+- **Rewards after every mission** (`src/campus/profile.ts`): 1–3 stars (finish, no hearts lost, under the
+  par time), coins, XP and player levels, unlocks (Kalki, boost, paints, memory shards, time trial), a
+  Garage for engine / tyre / boost upgrades and paint jobs, and a daily chiya streak. During a mission a
+  live ★ par clock, a combo chain, bonus coins around each objective and splits against your best run.
+- **Side activities** (`src/campus/extras.ts`): 24 memory shards around campus and the Kalki time trial
+  (medals and a personal record). Missions can be replayed from the Missions menu.
 - Gold beacon, compass and a heading-up minimap point the way; **M** opens the full campus map. Progress
-  autosaves. Hosts are fictional characters.
+  autosaves. The story is fictional. Campus officials (from the official Key Officials page) appear by name as
+  a tribute, only in friendly helper roles; the culprit, the suspects, the students, the cafeteria owner and
+  the night guard are invented.
 
 Regenerate the map data in this order: `node scripts/build-campus-data.mjs` (OpenStreetMap Overpass),
 `node scripts/build-campus-dem.mjs` (10 m elevation), `node scripts/merge-ms-buildings.mjs` (missing

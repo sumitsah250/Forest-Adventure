@@ -37,6 +37,12 @@ export interface VehicleSpec {
   brakeForce: number;
   topSpeed: number;
   antiRoll: number;
+  /** Aerodynamic drag factor (N per (m/s)²); 0.9 when not given. */
+  dragCoef?: number;
+  /** Share of drive force on the rear axle (0..1); 0.6 (4x4 split) when not given. */
+  rearBias?: number;
+  /** Rear tyre grip multiplier (a drifting kart lowers it); 1 when not given. */
+  rearGripScale?: number;
 }
 
 export const FOREST_4X4: VehicleSpec = {
@@ -274,13 +280,15 @@ export class VehiclePhysics {
       this.wheelSurface[i] = surf;
       const rear = i >= 2;
       const hb = input.handbrake && rear;
-      c.setWheelFrictionSlip(i, s.frictionSlip * GRIP[surf] * (hb ? 0.55 : 1));
-      // 4WD: torque split 40/60 front/rear.
-      c.setWheelEngineForce(i, (drive / 4) * (rear ? 1.2 : 0.8));
+      c.setWheelFrictionSlip(i, s.frictionSlip * GRIP[surf] * (hb ? 0.55 : 1) * (rear ? s.rearGripScale ?? 1 : 1));
+      // Torque split between the axles (4WD: 40/60 front/rear; a kart is rear drive).
+      const rb = s.rearBias ?? 0.6;
+      c.setWheelEngineForce(i, (drive / 2) * (rear ? rb : 1 - rb));
       let wb = brake * s.brakeForce;
       if (hb) wb = Math.max(wb, s.brakeForce * 1.4);
       // Engine braking and rolling resistance when coasting.
-      if (throttle === 0 && brake === 0) wb = Math.max(wb, absSpeed < 0.3 ? s.brakeForce * 0.6 : 2.2);
+      // (Scaled to the brakes so light vehicles coast like heavy ones: 2.2 for the 4x4.)
+      if (throttle === 0 && brake === 0) wb = Math.max(wb, absSpeed < 0.3 ? s.brakeForce * 0.6 : s.brakeForce * 0.038);
       c.setWheelBrake(i, wb);
       const len = c.wheelSuspensionLength(i) ?? s.suspensionRest;
       this.compressionVel[i] = (this.lastLen[i] - len) / dt;
@@ -309,7 +317,7 @@ export class VehiclePhysics {
     roll(2, 3);
 
     // Aerodynamic drag and water drag.
-    const drag = 0.9 * absSpeed * absSpeed + this.waterDepth * 2600 * absSpeed;
+    const drag = (s.dragCoef ?? 0.9) * absSpeed * absSpeed + this.waterDepth * 2600 * absSpeed;
     if (absSpeed > 0.01) {
       const k = (drag * dt) / Math.max(absSpeed, 0.01);
       this.body.applyImpulse({ x: -v.x * k, y: 0, z: -v.z * k }, true);

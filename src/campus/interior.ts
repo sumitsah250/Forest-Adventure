@@ -19,7 +19,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { GeoBuilder } from '../render/geoBuilder.ts';
 import type { PhysicsWorld } from '../physics/physics.ts';
 import { signTexture } from '../world/build.ts';
-import { pointInPoly, polyArea, type BuildingData, type Pt } from './geo.ts';
+import { glowSeed, pointInPoly, polyArea, type BuildingData, type Pt } from './geo.ts';
 import type { CampusGround } from './ground.ts';
 
 const CELL = 0.5;
@@ -104,6 +104,8 @@ export function buildEnterable(
 ): EnterableBuild | null {
   let pts = b.pts.slice();
   if (polyArea(pts) < 0) pts = pts.reverse();
+  // Lit-window order (the aWind channel is free on buildings).
+  const seed = glowSeed(b);
   if (pts.length < 4) return null;
   const levels = Math.max(1, Math.min(FLOOR_ROOMS.length, b.levels ?? 3));
 
@@ -317,7 +319,7 @@ export function buildEnterable(
       const A1 = new THREE.Vector3(P0[0], top, P0[1]);
       const C1 = new THREE.Vector3(P1[0], top, P1[1]);
       const C0 = new THREE.Vector3(P1[0], bottom, P1[1]);
-      B.facade.quad(B.facade.vert(A0, n, u0, v0, 0.92, 0, wall), B.facade.vert(A1, n, u0, v1, 1, 0, wall), B.facade.vert(C1, n, u1, v1, 1, 0, wall), B.facade.vert(C0, n, u1, v0, 0.92, 0, wall));
+      B.facade.quad(B.facade.vert(A0, n, u0, v0, 0.92, seed, wall), B.facade.vert(A1, n, u0, v1, 1, seed, wall), B.facade.vert(C1, n, u1, v1, 1, seed, wall), B.facade.vert(C0, n, u1, v0, 0.92, seed, wall));
       const off = (p: THREE.Vector3) => p.clone().addScaledVector(n, -EXT);
       B.facade.quad(B.facade.vert(off(C0), inward, u1, v0, 0.9, 0, INSIDE), B.facade.vert(off(C1), inward, u1, v1, 1, 0, INSIDE), B.facade.vert(off(A1), inward, u0, v1, 1, 0, INSIDE), B.facade.vert(off(A0), inward, u0, v0, 0.9, 0, INSIDE));
       const segLen = len * (t1 - t0);

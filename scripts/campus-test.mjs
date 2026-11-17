@@ -1,9 +1,10 @@
 // Campus Quest browser checks with the local Chrome / Edge (playwright-core).
 //
 //   node scripts/campus-test.mjs shots     # title + viewpoints around campus → test-results/campus-*.png
-//   node scripts/campus-test.mjs play      # plays all ten levels through the real UI to the ending
+//   node scripts/campus-test.mjs play      # plays the whole story through the real UI to the ending
+//   node scripts/campus-test.mjs play low 2   # the same for story version 2 (the ten-mission rewrite)
 //
-// Starts its own Vite server on port 5198. Add `low` / `medium` / `high` to pick a preset.
+// Starts its own Vite server on port 5198. Add `low` / `medium` / `high` to pick a preset, then 1 or 2 for the story version.
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -15,6 +16,7 @@ import { chromium } from 'playwright-core';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? 'shots';
 const quality = process.argv[3] ?? 'medium';
+const story = process.argv[4] === '2' ? '2' : '1';
 const port = 5198;
 const outDir = join(root, 'test-results');
 await mkdir(outDir, { recursive: true });
@@ -40,7 +42,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(`[${m.type()}] ${m.text()}`); });
 const t0 = Date.now();
-await page.goto(`http://localhost:${port}/campus.html?test&quality=${quality}`);
+await page.goto(`http://localhost:${port}/campus.html?test&quality=${quality}&story=${story}`);
 await page.waitForFunction(() => window.__ready || window.__error, null, { timeout: 240000 });
 const err = await page.evaluate(() => window.__error);
 if (err) throw new Error(err);
@@ -54,13 +56,18 @@ const shot = async (name) => {
 try {
   await wait(2500);
   await shot('title');
-  // Start a new game through the title menu.
-  await page.click('.cq-menu .cq-btn >> text=/^(Start|New game)/');
-  await wait(2500);
+  // Start a new story through the title menu (from a clean profile).
+  await page.evaluate(() => localStorage.removeItem('campus-blackout-profile-v1'));
+  await page.click('.cq-menu .cq-btn >> text=/Start the story|Restart story/');
+  await wait(1500);
+  for (let i = 0; i < 6 && (await page.$('.cq-dialog')); i += 1) {
+    await page.keyboard.press('KeyE');
+    await wait(150);
+  }
   const ov = await page.$('.cq-overlay--click');
   if (ov) await ov.click();
   await wait(800);
-  await shot('gate');
+  await shot('start');
 
   if (mode === 'shots') {
     const views = [
@@ -85,57 +92,113 @@ try {
     await shot('map');
     await page.keyboard.press('KeyM');
   } else {
-    // Play every level: walk to each target (teleport next to it), press E, read dialogue,
-    // answer quizzes from the test answer key. Collect fetch items on the way.
-    const answerAll = async () => {
-      for (let guard = 0; guard < 80; guard += 1) {
-        await wait(150);
-        const state = await page.evaluate(() => {
-          if (document.querySelector('.cq-overlay--ending')) return 'ending';
-          const quiz = document.querySelector('.cq-quiz');
-          if (quiz) return quiz.querySelector('.cq-quiz__feedback.show') ? 'feedback' : `quiz:${quiz.dataset.answer}`;
-          if (document.querySelector('.cq-dialog, .cq-message')) return 'dialog';
-          if (document.querySelector('.cq-overlay--click')) return 'click';
-          return 'none';
-        });
-        if (state === 'ending') return 'ending';
-        if (state === 'none') return 'none';
-        if (state === 'click') await page.click('.cq-overlay--click');
-        else if (state.startsWith('quiz:')) await page.keyboard.press(`Digit${state.slice(5)}`);
-        else await page.keyboard.press('KeyE');
-      }
-      return 'stuck';
-    };
-    const goTo = async (x, z) => {
-      await page.evaluate(([x, z]) => {
+    // Play the whole story through the real UI: stand at each objective (teleport), press E,
+    // read dialogue, answer quizzes and solve puzzles from the test answer keys, get into
+    // Kalki and drive Mission 2's rings for real (autopilot), teleport Kalki for later runs.
+    let lastKey = '';
+    let same = 0;
+    for (let guard = 0; guard < 6000; guard += 1) {
+      const s = await page.evaluate(() => {
         const c = window.__campus;
-        // Stand 1.8 m south of the spot, facing it.
-        c.player.teleport(x, c.ground.heightAt(x, z + 1.8), z + 1.8, 0);
-      }, [x, z]);
-      await wait(400);
-    };
-    for (let step = 0; step < 40; step += 1) {
-      // Fetch items load asynchronously after a conversation; wait for the next target.
-      await page.waitForFunction(() => window.__campus.quest.targets().main || document.querySelector('.cq-overlay--ending'), null, { timeout: 15000 }).catch(() => undefined);
-      const info = await page.evaluate(() => {
-        const q = window.__campus.quest;
-        const t = q.targets().main;
-        return { level: q.level, stage: q.stage, target: t, score: q.score };
+        const m = c.missions;
+        const q = (sel) => document.querySelector(sel);
+        if (q('.cq-overlay--click')) return { ui: 'click' };
+        if (c.cinema.playingShots) return { ui: 'cine' };
+        // Story 2's data-driven cutscenes (cutscene.ts): skip them, as a player holding E would.
+        if (c.cutscenes?.playing) {
+          c.cutscenes.skip();
+          return { ui: 'cutscene' };
+        }
+        if (q('.cq-complete')) return { ui: 'complete' };
+        if (q('.cq-ending')) return { ui: 'ending' };
+        const card = q('.cq-quiz');
+        if (card) {
+          if (q('.cq-quiz__feedback.show')) return { ui: 'feedback' };
+          if (card.classList.contains('mg')) return { ui: 'mg', sol: card.dataset.solution ?? null, ans: card.dataset.answer ?? null, sw: !!q('.mg-switches'), kp: !!q('.mg-keypad') };
+          return { ui: 'quiz', ans: card.dataset.answer };
+        }
+        if (q('.cq-dialog, .cq-message')) return { ui: 'dialog' };
+        const st = m.stepDef;
+        return { ui: 'none', index: m.index, step: m.step, kind: st?.kind ?? null, target: m.riddle ? { x: m.riddle.spot.x, z: m.riddle.spot.z, label: 'riddle' } : m.targets(c.kart.position).main, mode: c.mode };
       });
-      if (!info.target) break;
-      console.log(`  level ${info.level + 1} ${info.stage} → ${info.target.label} (${info.target.x.toFixed(0)}, ${info.target.z.toFixed(0)}) score ${info.score}`);
-      await goTo(info.target.x, info.target.z);
-      if (step < 3 || info.stage === 'fetch') await shot(`play-${String(step).padStart(2, '0')}`);
-      await page.keyboard.press('KeyE');
-      await wait(300);
-      const r = await answerAll();
-      if (r === 'ending') {
+      const key = JSON.stringify(s);
+      same = key === lastKey ? same + 1 : 0;
+      lastKey = key;
+      if (same > 60) throw new Error(`stuck at ${key}`);
+      if (s.ui === 'click') await page.click('.cq-overlay--click');
+      else if (s.ui === 'cine') { await wait(300); await page.keyboard.press('KeyE'); }
+      else if (s.ui === 'complete') {
+        await wait(1500);
+        await shot(`complete-${String(guard).padStart(4, '0')}`);
+        console.log(`  mission complete (story ${await page.evaluate(() => window.__campus.profile.story)} / ${await page.evaluate(() => window.__campus.missionCount)}, version ${story})`);
+        await page.keyboard.press('KeyE');
+        await wait(600);
+      } else if (s.ui === 'ending') {
         await wait(1200);
         await shot('ending');
-        console.log('  reached the convocation screen');
+        console.log('  reached the ending');
         break;
-      }
-      if (r === 'stuck') throw new Error('UI did not settle');
+      } else if (s.ui === 'dialog' || s.ui === 'feedback') await page.keyboard.press('KeyE');
+      else if (s.ui === 'quiz') await page.keyboard.press(`Digit${s.ans}`);
+      else if (s.ui === 'mg') {
+        if (s.sw && s.sol) {
+          for (let i = 0; i < s.sol.length; i += 1) if (s.sol[i] === '1') await page.keyboard.press(`Digit${i + 1}`);
+          await page.keyboard.press('Enter');
+        } else if (s.kp && s.sol) {
+          for (const ch of s.sol) await page.keyboard.press(`Digit${ch}`);
+          await page.keyboard.press('Enter');
+        } else if (s.ans) await page.keyboard.press(`Digit${s.ans}`);
+        else await page.evaluate(() => window.__mgSolve?.());
+        await wait(150);
+      } else if (!s.kind) await wait(300);
+      else if (s.kind === 'kart' || ((s.kind === 'drive' || s.kind === 'chase') && s.mode !== 'kart')) {
+        await page.evaluate(() => {
+          const c = window.__campus;
+          const d = c.kart.vehicle.driverDoorWorld();
+          c.player.teleport(d.x + 0.5, c.ground.heightAt(d.x, d.z), d.z);
+        });
+        await wait(250);
+        await page.keyboard.press('KeyE');
+        await wait(500);
+      } else if (s.kind === 'drive' || s.kind === 'chase') {
+        if (s.index === 1) {
+          // Real driving: steer at the next ring.
+          await page.evaluate(() => {
+            const c = window.__campus;
+            const t = c.missions.targets(c.kart.position).main;
+            if (!t) return;
+            const p = c.kart.position;
+            let err = Math.atan2(t.x - p.x, t.z - p.z) - c.kart.heading;
+            while (err > Math.PI) err -= 2 * Math.PI;
+            while (err < -Math.PI) err += 2 * Math.PI;
+            c.input.touchMove.x = Math.max(-1, Math.min(1, -err * 2.2));
+            c.input.touchMove.y = Math.abs(err) > 1.2 ? 0.4 : 1;
+          });
+          await wait(100);
+        } else {
+          await page.evaluate(() => {
+            const c = window.__campus;
+            const t = c.missions.targets(c.kart.position).main;
+            if (t) c.kart.place(t.x, t.z, c.kart.heading, c.ground);
+          });
+          await wait(120);
+        }
+      } else if (s.target) {
+        await page.evaluate(() => {
+          const c = window.__campus;
+          c.input.touchMove.x = 0;
+          c.input.touchMove.y = 0;
+          if (c.mode === 'kart') c.exitKart();
+        });
+        await page.evaluate(([x, z]) => {
+          const c = window.__campus;
+          c.player.teleport(x, c.ground.heightAt(x, z + 1.6), z + 1.6, 0);
+        }, [s.target.x, s.target.z]);
+        await wait(250);
+        await page.keyboard.press('KeyE');
+        await wait(250);
+      } else await wait(200);
+      await wait(40);
     }
   }
   const fps = await page.evaluate(() => new Promise((res) => {

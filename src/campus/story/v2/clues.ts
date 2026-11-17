@@ -1,0 +1,36 @@
+// The thirteen clues. Every one must agree with the hidden truth in docs/STORY_V2.md:
+// Sunil signed out at 6:30 but stayed, cut the power at 6:52, and at 6:55 logged in at the exam
+// console as sbasnet, switched to agurung and pushed two bugs from a red pen drive.
+//
+// A clue found by the player is a gold card; one Asha "finds" at mission end is silver.
+// (Finding and saving clues is TODO_P5_CLUE_TRACKING; this file is the data it will use.)
+
+import type { ClueDef, ClueId } from '../types.ts';
+
+export const CLUES: ClueDef[] = [
+  { id: 'c1', mission: 'v2-pit-stop', title: 'Red pen drive', text: 'Sunil dai wears a red pen drive on his lanyard.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c2', mission: 'v2-backup-power', title: '"6:55 sharp"', text: 'Sunil dai said the locks came down at 6:55, before anyone had told him.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c3', mission: 'v2-witness', title: 'Krishna Dai\'s statement', text: 'A grey fest hoodie with a red pen drive left the server room at 6:55.', pointsTo: 'hoodie', role: 'evidence' },
+  { id: 'c4', mission: 'v2-witness', title: 'Yellow lanyard strap', text: 'A torn yellow strap by the Auditorium. Students wear blue; contractors wear yellow.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c5', mission: 'v2-witness', title: 'Hoodie thread', text: 'A grey hoodie thread caught on the MSC Hostel fence.', pointsTo: 'hoodie', role: 'false-lead' },
+  { id: 'c6', mission: 'v2-landslide', title: 'Raju ran', text: 'Raju wears the grey hoodie, and ran when the server room was mentioned.', pointsTo: 'raju', role: 'false-lead' },
+  { id: 'c7', mission: 'v2-shelves', title: 'Library register', text: 'The paper register has Raju in the library from 6:40 to 7:15.', pointsTo: 'raju', role: 'clears', clears: 'raju' },
+  { id: 'c8', mission: 'v2-shelves', title: 'Note in "Ethics of AI"', text: 'In Asha\'s handwriting: the rule "protect the exam".', pointsTo: 'asha', role: 'false-lead' },
+  { id: 'c9', mission: 'v2-signal', title: 'MITRA\'s memory', text: 'The order came at 6:55 from account agurung, on terminal EXAM-CONSOLE-01. Asha\'s account, but whose hands?', pointsTo: 'asha', role: 'false-lead' },
+  { id: 'c10', mission: 'v2-runaway', title: 'Backup key door log', text: 'Asha was badged inside the RIC from 6:40 to 7:02.', pointsTo: 'asha', role: 'clears', clears: 'asha' },
+  { id: 'c11', mission: 'v2-whodunit', title: 'Guard register', text: 'Sunil signed out at 6:30, but his motorbike is still in the motorcycle parking.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c12', mission: 'v2-whodunit', title: 'Console log', text: 'Login sbasnet, switch to agurung, both bugs pushed at 6:55.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c13', mission: null, minigame: 'chiya-rush', title: 'Cafeteria gossip', text: 'Krishna Dai heard that Sunil\'s contract ends this month: MITRA replaces his paid system.', pointsTo: 'sunil', role: 'evidence' },
+];
+
+/**
+ * The accusation in mission 9 (TODO_P6_EVIDENCE_BOARD_ACCUSE): three questions, and the clues
+ * each one accepts. Accusing Raju shows c7; accusing Asha shows c9 and c10.
+ */
+export const ACCUSATION: { question: string; accepts: ClueId[] }[] = [
+  { question: 'Who could reach the exam console at 6:55?', accepts: ['c4', 'c11'] },
+  { question: 'Whose hands were on the keyboard?', accepts: ['c1', 'c12'] },
+  { question: 'Who knew too much, or had a reason?', accepts: ['c2', 'c13'] },
+];
+
+export const WRONG_ACCUSATION: Record<'raju' | 'asha', ClueId[]> = { raju: ['c7'], asha: ['c9', 'c10'] };
