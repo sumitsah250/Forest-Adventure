@@ -54,7 +54,22 @@ export class Person {
 
   private ground: Ground;
 
+  private oneWay = false;
+
+  /** Runs to (x, z) at `speed` m/s in a straight line, then stands there. */
+  runTo(x: number, z: number, speed: number): void {
+    this.route = [[this.pos.x, this.pos.z], [x, z]];
+    this.seg = 0;
+    this.t = 0;
+    this.dir = 1;
+    this.pause = 0;
+    this.speed = speed;
+    this.oneWay = true;
+  }
+
   place(x: number, z: number, facing: number): void {
+    this.route = null;
+    this.oneWay = false;
     this.pos.set(x, this.ground.heightAt(x, z), z);
     this.facing = facing;
     this.homeFacing = facing;
@@ -103,6 +118,14 @@ export class Person {
     this.t += (this.speed * dt * this.dir) / len;
     if (this.t > 1 || this.t < 0) {
       const next = this.seg + this.dir;
+      if (this.oneWay && next >= r.length - 1) {
+        // A scripted run: stop at the end and stand there.
+        this.route = null;
+        this.oneWay = false;
+        this.vel.set(0, 0, 0);
+        this.homeFacing = this.facing;
+        return;
+      }
       if (next < 0 || next >= r.length - 1) {
         this.dir = -this.dir;
         this.t = THREE.MathUtils.clamp(this.t, 0, 1);

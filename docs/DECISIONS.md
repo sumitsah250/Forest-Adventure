@@ -19,7 +19,7 @@ Choices made while building Story V2 where the spec ([STORY_V2.md](STORY_V2.md))
 | 8 | Power in V2 | Dies at 6:52 PM (C1), comes back all at once at the end of M3 (C3), and stays on. |
 | 9 | Where the main gate stands open or shut | Open until the slam at the end of M1. Shut from M2 to M9. In M10 Sunil opens it from the exam console as he flees, so it stands open during the chase until MITRA shuts it (C9). It opens for good in the ending (C10). |
 | 10 | When c1 and c2 become silver if missed | Quietly, when M9 starts, so they are on the board before the accusation. |
-| 11 | Third star in clue missions | Needs par time, no hearts lost and every clue of that mission gold. Clue missions are M2, M3, M4, M5, M6 and M9. M7 and M8 give their clues gold automatically, so they use the normal rule. |
+| 11 | Third star in clue missions | Every clue of that mission gold replaces the par-time condition (no hearts lost is still needed). Beating par still earns +1 minute to spare. Clue missions are M2, M3, M4, M5, M6 and M9. M7 and M8 give their clues gold automatically, so they use the normal rule. |
 | 12 | The campus screens | Show the player's face, name, roll number and "INTRUDER" from the end of M3 until the culprit is named in M9, then "CASE REOPENED" until the reboot, then "HERO OF WRC". |
 | 13 | Scout drone (Drone Hack reward) | In the next mission, every enemy drone is marked on the minimap and gets an edge-of-screen arrow. |
 | 14 | Boost charge (Generator reward) | One free refill of Kalki's boost meter, used automatically the first time the meter runs empty. |
@@ -31,3 +31,8 @@ Choices made while building Story V2 where the spec ([STORY_V2.md](STORY_V2.md))
 | 20 | Sunil's motorbike rider | Built from simple shapes in Sunil's colours with a helmet. The walking characters have no riding pose. |
 | 21 | When MITRA's "spotted" lines play | When a drone's alarm first passes 60% (searchlights, the M1 pursuer, sweeping drones). Never more than one every 6 seconds, and never the same line twice in a row. |
 | 22 | Fest demo saves | Demo mode never writes the player's save. Each player starts fresh; only the leaderboard is kept. |
+| 23 | C7 (the red string) | Played on the evidence board itself, not as a 3D cutscene: the string draws from the culprit's portrait through the three cards, then the portrait goes cold. |
+| 24 | M3 puzzle timer runs out | The puzzle closes, the player loses a heart and tries again; the door-cut sparks keep going while the timer runs. |
+| 25 | M4 rain fade | Each uncollected clue object fades over 90 s once the rain starts. A clue that fades is picked up later as silver by Asha at mission end, so the story always moves on. |
+| 26 | Minutes to spare | Start at 30. A failed attempt costs 3, beating par gives 1 back, a wrong accusation costs 15. At 0 or below, M10's par times are 20% tighter. |
+| 27 | The campus screens in V2 | Four wall screens (RIC, Administration Block, Cafeteria, Power House) share one canvas texture, redrawn only when the text or mode changes. They are dark until the power returns in C3. |

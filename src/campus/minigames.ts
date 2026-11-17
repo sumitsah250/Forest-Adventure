@@ -11,7 +11,9 @@
 //
 // Test builds expose window.__mgSolve() so automated play-throughs can finish any of them.
 
-import type { PuzzleDef } from './story.ts';
+import { V2_TEXT, type PuzzleDef } from './story.ts';
+import type { MiniGame } from './minigames/types.ts';
+import { bubbleLevel } from './minigames/bubble.ts';
 
 const TEST = new URLSearchParams(location.search).has('test');
 
@@ -20,6 +22,8 @@ export interface ModalHost {
   close(): void;
   keyHandler: ((e: KeyboardEvent) => void) | null;
   onSound: ((name: string) => void) | null;
+  /** Set by an open card: ends it as a failure (a countdown ran out). */
+  onAbort?: (() => void) | null;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -77,6 +81,13 @@ function frame(host: ModalHost, title: string, clue: string, hearts: string) {
     for (const c of cleanups.splice(0)) c();
   };
   next.onclick = close;
+  host.onAbort = () => {
+    if (!done) {
+      done = true;
+      result = false;
+    }
+    close();
+  };
   if (TEST) (window as unknown as { __mgSolve?: () => void }).__mgSolve = () => finish(true, '(test)');
   /** Key handler wrapper: the puzzle's keys until done, then Continue. */
   const keys = (fn: (e: KeyboardEvent) => void) => {
@@ -106,7 +117,54 @@ export function runPuzzle(host: ModalHost, p: PuzzleDef, hearts: string): Promis
     case 'tuner': return tuner(host, p, hearts);
     case 'debug': return debug(host, p, hearts);
     case 'simon': return simon(host, p, hearts);
+    case 'bubble': return runMini(host, p.title, p.clue, hearts, bubbleLevel(p.hold, V2_TEXT.mini.bubble)).then((r) => r.ok);
   }
+}
+
+// ------------------------------------------------------------------ mini-games
+
+/**
+ * Runs a mini-game (minigames/types.ts) inside the standard card: its own body, a frame loop,
+ * held keys, and the shared result panel. Resolves with its result once Continue is pressed.
+ */
+export function runMini(host: ModalHost, title: string, clue: string, hearts: string, game: MiniGame, opts: Record<string, unknown> = {}): Promise<{ ok: boolean; score?: number }> {
+  const f = frame(host, title, clue, hearts);
+  const held = new Set<string>();
+  const down = (e: KeyboardEvent) => held.add(e.code);
+  const up = (e: KeyboardEvent) => held.delete(e.code);
+  window.addEventListener('keydown', down);
+  window.addEventListener('keyup', up);
+  game.start({ body: f.body, sound: (n) => host.onSound?.(n), held, opts });
+  let last = performance.now();
+  let raf = 0;
+  let score: number | undefined;
+  let ok = false;
+  const tick = (now: number) => {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    game.update(dt);
+    if (game.done) {
+      const r = game.finish();
+      ok = r.ok;
+      score = r.score;
+      f.finish(r.ok, r.note);
+      return;
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  f.cleanups.push(() => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener('keydown', down);
+    window.removeEventListener('keyup', up);
+    game.dispose?.();
+  });
+  f.keys((e) => game.key?.(e));
+  if (TEST) (window as unknown as { __mgSolve?: () => void }).__mgSolve = () => {
+    ok = true;
+    f.finish(true, '(test)');
+  };
+  return f.promise.then((r) => ({ ok: r && ok, score }));
 }
 
 // ------------------------------------------------------------------ switches

@@ -114,11 +114,27 @@ MISSIONS.forEach((m, mi) => {
         checkWhere(s.at, ctx);
         s.lines.forEach((l, k) => checkCard(l, `${ctx} card ${k + 1}`));
         clue(s.clue, ctx);
+        clue(s.lookCloser, `${ctx} (look closer)`);
         break;
       case 'radio':
         speaker(s.from, ctx, false);
         s.lines.forEach((l, k) => checkCard(l, `${ctx} card ${k + 1}`));
         clue(s.clue, ctx);
+        if (s.pin) {
+          clue(s.pin.clue, `${ctx} (pinned line)`);
+          if (s.pin.line < 0 || s.pin.line >= s.lines.length) err(`${ctx}: pinned line ${s.pin.line} does not exist`);
+        }
+        break;
+      case 'board':
+        break;
+      case 'run':
+        speaker(s.npc, ctx, true);
+        checkWhere(s.to, ctx);
+        clue(s.clue, ctx);
+        break;
+      case 'hold':
+        checkWhere(s.at, ctx);
+        checkCard(s.prompt, `${ctx} prompt`);
         break;
       case 'read':
         s.lines.forEach((l, k) => checkCard(l, `${ctx} card ${k + 1}`));
@@ -129,8 +145,6 @@ MISSIONS.forEach((m, mi) => {
           checkWhere(it.at, `${ctx} "${it.label}"`);
           clue(it.clue, ctx);
         }
-        if (s.drones) todos.push([M, 'TODO_P5_COLLECT_DRONES', 'searchlight drones during this collect step']);
-        if (s.fade) todos.push([M, 'TODO_P5_RAIN_FADE', 'clues fade as the rain grows']);
         break;
       case 'goto':
       case 'stealth':
@@ -138,7 +152,7 @@ MISSIONS.forEach((m, mi) => {
         break;
       case 'puzzle':
         checkWhere(s.at, ctx);
-        if (s.time) todos.push([M, 'TODO_P5_PUZZLE_TIMER', `${s.time} s countdown during the puzzle`]);
+        if (s.cutDoor) checkWhere(s.cutDoor, ctx);
         break;
       case 'riddle':
         err(`${ctx}: V2 has no riddles in missions`);
@@ -171,8 +185,8 @@ for (const id of Object.keys(WEATHER)) if (!missionIds.has(id)) err(`WEATHER: un
 for (const [id, c] of staff) if (!missionIds.has(c.mission)) err(`real staff member ${id}: unknown mission "${c.mission}"`);
 
 // ------------------------------------------------------------------ clues
-for (let i = 1; i <= 13; i += 1) if (!clueIds.has(`c${i}`)) err(`clue c${i} is missing`);
-if (CLUES.length !== 13) err(`expected 13 clues, found ${CLUES.length}`);
+for (let i = 1; i <= 14; i += 1) if (!clueIds.has(`c${i}`)) err(`clue c${i} is missing`);
+if (CLUES.length !== 14) err(`expected 14 clues (13 from the spec, plus c14 from decision 1), found ${CLUES.length}`);
 for (const c of CLUES) {
   if (c.mission === null) {
     if (!c.minigame) err(`clue ${c.id}: no mission and no mini-game`);

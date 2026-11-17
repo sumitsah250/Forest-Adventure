@@ -244,10 +244,21 @@ export interface RadioLogEntry {
   m: string;
   who: string;
   text: string;
+  /** A clue this line can prove when pinned to the board (Sunil's "6:55": c2). */
+  clue?: string;
+  /** Pinned to the board already. */
+  pinned?: boolean;
+}
+
+/** Pin buttons on each line (story 2): `onPin` answers with a message to show. */
+export interface PinOptions {
+  label: string;
+  done: string;
+  onPin: (e: RadioLogEntry) => string;
 }
 
 /** Every line heard over the radio so far, newest mission first, to read again. */
-export function openRadioLog(host: DialogueHost, entries: RadioLogEntry[], onClose: () => void): void {
+export function openRadioLog(host: DialogueHost, entries: RadioLogEntry[], onClose: () => void, pin?: PinOptions): void {
   const ov = host.open('cq-overlay--pause');
   const box = el('div', 'cq-panel cq-radiolog');
   const head = el('div', 'cq-panel__head');
@@ -282,6 +293,22 @@ export function openRadioLog(host: DialogueHost, entries: RadioLogEntry[], onClo
       const text = el('span');
       text.textContent = entries[j].text;
       row.append(who, text);
+      if (pin) {
+        const entry = entries[j];
+        const b = el('button', 'cq-radiolog__pin');
+        b.type = 'button';
+        b.textContent = entry.pinned ? pin.done : pin.label;
+        b.disabled = !!entry.pinned;
+        const note = el('small', 'cq-radiolog__note');
+        b.onclick = () => {
+          note.textContent = pin.onPin(entry);
+          if (entry.pinned) {
+            b.textContent = pin.done;
+            b.disabled = true;
+          }
+        };
+        row.append(b, note);
+      }
       list.append(row);
     }
     k = start;

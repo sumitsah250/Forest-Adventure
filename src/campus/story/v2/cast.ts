@@ -27,7 +27,6 @@ const npc = (id: string, outfit: NpcDef['outfit'], at: NpcDef['at']): NpcDef => 
 /** The people who stand in the world, at their usual posts. A `talk` step with `at` moves one for a mission. */
 export const NPCS: NpcDef[] = [
   npc('asha', { ...base, id: 'bw-asha', skin: '#b58262', hair: '#120e0c', top: '#3d6b8a', topPattern: 'knit', trousers: '#2a3140', trouserPattern: 'denim', boots: '#ecebe6', headwear: 'none', backpack: '#6a2a3a', female: true, hairStyle: 'ponytail' }, { building: 'Research and Innovation Centre (RIC)' }),
-  // TODO_P5: the red pen drive on a yellow lanyard (clue c1) is a prop still to be modelled.
   npc('sunil', { ...base, id: 'v2-sunil', skin: '#a8724f', hair: '#1a1410', top: '#3a4654', topPattern: 'canvas', trousers: '#33373d', trouserPattern: 'twill', boots: '#1a1410', headwear: 'none', backpack: null, hairStyle: 'short' }, { point: 'Administration Block' }),
   npc('raju', { ...base, id: 'v2-raju', skin: '#b07a58', hair: '#16110d', top: '#8d9299', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#e4e2dc', headwear: 'none', backpack: null, hairStyle: 'textured' }, { building: 'Table Tennis' }),
   npc('krishna', { ...base, id: 'bw-dai', skin: '#9c6a4c', hair: '#3a3530', top: '#e8e2d2', topPattern: 'canvas', trousers: '#3a3c40', trouserPattern: 'twill', boots: '#1a1410', headwear: 'cap', headwearColor: '#7a2a2a', backpack: null, beard: true }, { point: 'Cafeteria', outside: 'wall' }),
@@ -40,6 +39,13 @@ export const NPCS: NpcDef[] = [
   npc('tiwari', STAFF.suitGrey, { building: 'Department of Electronics and Computer Engineering' }),
   npc('chief', STAFF.suitBrown, { point: 'WRC Auditorium', outside: 'wall', beside: 6 }),
 ];
+
+// Props over the outfits: Sunil's yellow contractor lanyard with the red pen drive (clue c1),
+// Raju's grey fest hoodie.
+for (const n of NPCS) {
+  if (n.id === 'sunil') n.extras = ['lanyard'];
+  if (n.id === 'raju') n.extras = ['hood'];
+}
 
 /** How a character is named when heard over the radio or a speaker. */
 export const VOICES: Record<string, { name: string; role: string }> = {

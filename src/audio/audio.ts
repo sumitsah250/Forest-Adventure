@@ -744,6 +744,33 @@ export class AudioEngine implements SfxApi {
         for (const [f, d] of [[523.3, 0.5], [659.3, 0.62], [784, 0.74], [1046.5, 0.9]] as const) this.tone(out, t + d, f, f, 1.6, 0.06, 'triangle');
         break;
       }
+      case 'clueGold':
+        out.connect(this.reverbSend);
+        for (const [f, d] of [[1046.5, 0], [1318.5, 0.07], [1568, 0.14], [2093, 0.22]] as const) this.tone(out, t + d, f, f, 0.6, 0.08, 'triangle');
+        break;
+      case 'clueSilver':
+        for (const [f, d] of [[784, 0], [987.8, 0.09]] as const) this.tone(out, t + d, f, f, 0.45, 0.06, 'sine');
+        break;
+      case 'pin':
+        this.burst(out, t, { type: 'bandpass', freq: 2800, q: 3, dur: 0.03, vol: 0.5 });
+        this.tone(out, t, 260, 150, 0.08, 0.3, 'triangle');
+        break;
+      case 'string':
+        this.tone(out, t, 180, 240, 0.35, 0.08, 'sawtooth');
+        break;
+      case 'chord':
+        out.connect(this.reverbSend);
+        for (const f of [110, 164.8, 220, 277.2]) this.tone(out, t, f, f, 2.2, 0.08, 'triangle');
+        break;
+      case 'tickBack':
+        for (let i = 0; i < 5; i += 1) this.burst(out, t + i * 0.11, { type: 'bandpass', freq: 3600 - i * 300, q: 6, dur: 0.02, vol: 0.4 });
+        break;
+      case 'powerDown':
+        this.tone(out, t, 900, 70, 1.2, 0.14, 'sawtooth');
+        break;
+      case 'cutting':
+        this.burst(out, t, { type: 'bandpass', freq: 3200 + Math.random() * 800, q: 4, dur: 0.12, vol: 0.18 });
+        break;
       case 'gateCreak':
         // Old hinges taking the weight of a big iron leaf.
         this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 900, q: 6, dur: 1.1, vol: 0.25, attack: 0.2 });

@@ -49,7 +49,7 @@ export interface Profile {
   /** V2: the sunrise clock's minutes to spare. */
   minutes: number;
   /** Lines heard over the radio or from MITRA, oldest first, to read again (the last 80). */
-  radioLog: { m: string; who: string; text: string }[];
+  radioLog: { m: string; who: string; text: string; clue?: string; pinned?: boolean }[];
 }
 
 function fresh(): Profile {

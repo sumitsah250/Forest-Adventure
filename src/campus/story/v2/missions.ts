@@ -48,8 +48,8 @@ export const MISSIONS: MissionDef[] = [
       },
       { kind: 'talk', npc: 'dhungana', lines: T.m2.dhungana2 },
       { kind: 'drive', obj: T.m2.driveObj, route: RING_EAST, time: 50 },
-      // Clue c1 (the red pen drive, never mentioned) is found by an optional "look closer": TODO_P5_CLUE_TRACKING.
-      { kind: 'talk', npc: 'sunil', at: { building: 'Power House', beside: 3.5 }, obj: T.m2.sunilObj, lines: T.m2.sunil, clue: 'c1' },
+      // Clue c1 (the red pen drive) is never mentioned: tapping Sunil's lanyard during the talk finds it.
+      { kind: 'talk', npc: 'sunil', at: { building: 'Power House', beside: 3.5 }, obj: T.m2.sunilObj, lines: T.m2.sunil, lookCloser: 'c1' },
     ],
     reward: { coins: 150, xp: 150, unlock: 'grip', card: T.m2.card },
   },
@@ -59,16 +59,17 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       { kind: 'talk', npc: 'bhattarai', lines: T.m3.bhattarai1 },
       { kind: 'collect', obj: T.m3.fuseObj, verb: 'Take', items: [{ label: T.m3.fuseLabel, model: 'part', at: { building: 'Electrical Lab' } }] },
-      { kind: 'radio', from: 'sunil', lines: T.m3.sunilRadio, clue: 'c2' },
+      // Clue c2 is never announced: his "6:55" line (line 2) goes to the radio log, to pin to the board.
+      { kind: 'radio', from: 'sunil', lines: T.m3.sunilRadio, pin: { clue: 'c2', line: 1 } },
       { kind: 'talk', npc: 'bhattarai', lines: T.m3.bhattarai2 },
       {
-        // time: the drone cutting through the door. Ignored until TODO_P5_PUZZLE_TIMER.
-        kind: 'puzzle', at: { building: 'Power House' }, label: T.m3.breakerLabel, obj: T.m3.breakerObj, model: 'breaker', time: 90,
+        // time: a drone is cutting through the Power House door while the player works.
+        kind: 'puzzle', at: { building: 'Power House' }, label: T.m3.breakerLabel, obj: T.m3.breakerObj, model: 'breaker', time: 90, cutDoor: { building: 'Power House' },
         puzzle: { type: 'switches', title: T.m3.breakerLabel, clue: T.m3.breakerClue, bits: 5, target: 19, why: T.m3.breakerWhy },
       },
       { kind: 'talk', npc: 'bhattarai', lines: T.m3.bhattarai3 },
+      // C3 brings the lights back and switches every campus screen on, showing the player's face.
       { kind: 'cutscene', id: 'C3' },
-      { kind: 'stub', todo: 'TODO_P5_PLAYER_FACE_SCREENS', note: 'Every screen shows the player\'s face.' },
       { kind: 'radio', from: 'mitra', lines: T.m3.mitraEnd },
     ],
     reward: { coins: 160, xp: 160, unlock: 'boost', card: T.m3.card },
@@ -79,16 +80,16 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       { kind: 'talk', npc: 'krishna', lines: T.m4.krishna1, clue: 'c3' },
       {
-        // SPEC GAP: the spec says three clues here but lists two objects (c4, c5); c3 is the
-        // statement above. NESS WRC has no clue assigned yet. fade: TODO_P5_RAIN_FADE.
-        kind: 'collect', obj: T.m4.collectObj, verb: 'Pick up', time: 130, fade: 'rain', items: [
+        // Three clue objects that fade as the rain grows (decision 1): the strap, the thread, the cap.
+        kind: 'collect', obj: T.m4.collectObj, verb: 'Pick up', fade: 'rain', items: [
           { label: T.m4.lanyard, model: 'evidence', at: { point: 'WRC Auditorium', outside: 'wall' }, clue: 'c4' },
           { label: T.m4.thread, model: 'evidence', at: { point: 'MSC Hostel', outside: 'wall' }, clue: 'c5' },
+          { label: T.m4.cap, model: 'usb', at: { point: 'NESS WRC', outside: 'wall' }, clue: 'c14' },
         ],
       },
       { kind: 'talk', npc: 'krishna', lines: T.m4.krishna2 },
       { kind: 'radio', from: 'asha', lines: T.m4.ashaBoard },
-      { kind: 'stub', todo: 'TODO_P5_EVIDENCE_BOARD_OPEN', note: 'The evidence board opens: Raju, Asha, Sunil.' },
+      { kind: 'board' },
       { kind: 'radio', from: 'asha', lines: T.m4.ashaEnd },
     ],
     reward: { coins: 150, xp: 150, unlock: 'board', card: T.m4.card },
@@ -110,14 +111,18 @@ export const MISSIONS: MissionDef[] = [
         ],
       },
       { kind: 'goto', at: { area: 'WRC Parapet' }, label: T.m5.gotoLabel, obj: T.m5.gotoObj, time: 75 },
-      { kind: 'stub', todo: 'TODO_P5_BUBBLE_LEVEL', note: 'Bubble-level mini-game: level the wall.' },
+      {
+        kind: 'puzzle', at: { area: 'WRC Parapet' }, label: T.m5.bubbleLabel, obj: T.m5.bubbleObj, model: 'gnss',
+        puzzle: { type: 'bubble', title: T.m5.bubbleTitle, clue: T.m5.bubbleClue, hold: 3 },
+      },
       {
         kind: 'puzzle', at: { area: 'WRC Parapet' }, label: T.m5.wallLabel, obj: T.m5.wallObj, model: 'panel',
         puzzle: { type: 'keypad', title: T.m5.wallLabel, clue: T.m5.wallClue, code: '36', why: T.m5.wallWhy },
       },
       { kind: 'radio', from: 'chhetri', lines: T.m5.chhetriRadio },
-      { kind: 'stub', todo: 'TODO_P5_RAJU_RUNS', note: 'Raju runs when the server room is mentioned.', clue: 'c6' },
       { kind: 'radio', from: 'asha', lines: T.m5.ashaEnd },
+      // He bolts back to the Table Tennis hall; the player sees it happen (clue c6).
+      { kind: 'run', npc: 'raju', to: { building: 'Table Tennis' }, clue: 'c6' },
     ],
     reward: { coins: 180, xp: 180, unlock: 'paint:monsoon', card: T.m5.card },
   },
@@ -127,7 +132,7 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       { kind: 'talk', npc: 'khanal', lines: T.m6.khanal1 },
       {
-        // drones: searchlights sweeping the parks. Ignored until TODO_P5_COLLECT_DRONES.
+        // Searchlight drones sweep around each book.
         kind: 'collect', obj: T.m6.collectObj, verb: 'Pick up', time: 150, drones: 3, items: [
           { label: T.m6.bookData, model: 'book', at: { point: 'Internet Zone', dx: 2, dz: 2 } },
           { label: T.m6.bookEthics, model: 'book', at: { point: 'BP Koirala Statue', dx: 3, dz: -2 } },
@@ -148,11 +153,11 @@ export const MISSIONS: MissionDef[] = [
   },
   // ------------------------------------------------------------------ M7 Signal Hunt
   {
-    // SPEC GAP: BP Park is listed for this mission but nothing happens there.
+    // BP Park: Bhurtyal sir waits for the player there (decision 7).
     id: 'v2-signal', title: T.m7.title, clock: '9:20 PM', location: T.m7.location, sky: 'night', par: 330, brief: T.m7.brief,
     steps: [
       { kind: 'radio', from: 'sunil', lines: T.m7.sunilStart },
-      { kind: 'talk', npc: 'bhurtyal', lines: T.m7.bhurtyal },
+      { kind: 'talk', npc: 'bhurtyal', at: { area: 'BP Park' }, lines: T.m7.bhurtyal },
       {
         kind: 'puzzle', at: { point: 'GNSS Receiver Test Station' }, label: T.m7.bearing1Label, obj: T.m7.bearing1Obj, model: 'gnss',
         puzzle: { type: 'tuner', title: T.m7.bearing1Title, clue: T.m7.bearing1Clue },
@@ -168,9 +173,9 @@ export const MISSIONS: MissionDef[] = [
         kind: 'puzzle', at: { point: 'Saraswati Temple', dx: -6, dz: 5 }, label: T.m7.lockLabel, obj: T.m7.lockObj, model: 'relay',
         puzzle: { type: 'simon', title: T.m7.lockLabel, clue: T.m7.lockClue, length: 5 },
       },
-      { kind: 'stub', todo: 'TODO_P5_PULL_RELAY', note: 'Pull the relay out of its mast.' },
+      { kind: 'hold', at: { point: 'Saraswati Temple', dx: -6, dz: 5 }, label: T.m7.pullLabel, obj: T.m7.pullObj, model: 'relay', seconds: 2.5, prompt: T.m7.pullPrompt },
+      // C6: every drone drops a metre, hangs, and lights up blue; MITRA's memory types on screen.
       { kind: 'cutscene', id: 'C6' },
-      { kind: 'stub', todo: 'TODO_P5_DRONES_FREEZE_BLUE', note: 'Every drone freezes and turns blue.' },
       { kind: 'radio', from: 'mitra', lines: T.m7.mitraEnd, clue: 'c9' },
       { kind: 'radio', from: 'sunil', lines: T.m7.sunilEnd },
     ],

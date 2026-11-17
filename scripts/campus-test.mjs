@@ -58,6 +58,14 @@ try {
   await shot('title');
   // Start a new story through the title menu (from a clean profile).
   await page.evaluate(() => localStorage.removeItem('campus-blackout-profile-v1'));
+  // Story 2 asks for a name and roll number first (screens.ts).
+  if (await page.$('form.cq-name')) {
+    const inputs = await page.$$('form.cq-name input');
+    await inputs[0].fill('Test Player');
+    if (inputs[1]) await inputs[1].fill('PAS078BCT001');
+    await page.click('form.cq-name button[type=submit], form.cq-name .cq-btn');
+    await wait(1200);
+  }
   await page.click('.cq-menu .cq-btn >> text=/Start the story|Restart story/');
   await wait(1500);
   for (let i = 0; i < 6 && (await page.$('.cq-dialog')); i += 1) {
@@ -110,6 +118,7 @@ try {
           return { ui: 'cutscene' };
         }
         if (q('.cq-complete')) return { ui: 'complete' };
+        if (q('.cq-board')) return { ui: 'board' };
         if (q('.cq-ending')) return { ui: 'ending' };
         const card = q('.cq-quiz');
         if (card) {
@@ -125,7 +134,19 @@ try {
       same = key === lastKey ? same + 1 : 0;
       lastKey = key;
       if (same > 60) throw new Error(`stuck at ${key}`);
-      if (s.ui === 'click') await page.click('.cq-overlay--click');
+      if (s.ui === 'board') await page.click('.cq-board > .cq-btn');
+      else if (s.ui === 'none' && s.kind === 'hold' && s.target) {
+        // Hold-to-pull: stand at the device and hold E.
+        await page.evaluate(([x, z]) => {
+          const c = window.__campus;
+          if (c.mode === 'kart') c.exitKart();
+          c.player.teleport(x, c.ground.heightAt(x, z + 1.6), z + 1.6, 0);
+        }, [s.target.x, s.target.z]);
+        await wait(300);
+        await page.keyboard.down('KeyE');
+        await wait(3200);
+        await page.keyboard.up('KeyE');
+      } else if (s.ui === 'click') await page.click('.cq-overlay--click');
       else if (s.ui === 'cine') { await wait(300); await page.keyboard.press('KeyE'); }
       else if (s.ui === 'complete') {
         await wait(1500);

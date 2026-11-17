@@ -9,7 +9,7 @@ import { isEnabled } from '../games.ts';
 import type { ModalHost } from './minigames.ts';
 import { paintPlan } from './paint.ts';
 import { STORY_BLURB } from './story.ts';
-import { openRadioLog, runDialogue, type DialogueDeps, type RadioLogEntry } from './dialogue.ts';
+import { openRadioLog, runDialogue, type DialogueDeps, type PinOptions, type RadioLogEntry } from './dialogue.ts';
 
 const TEST = new URLSearchParams(location.search).has('test');
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -103,6 +103,7 @@ export class CampusUI implements ModalHost {
   private compassMark: HTMLDivElement;
   private compassDist: HTMLDivElement;
   private timerEl: HTMLDivElement;
+  private sunEl: HTMLDivElement;
   private spotEl: HTMLDivElement;
   private speedEl: HTMLDivElement;
   private bannerEl: HTMLDivElement;
@@ -162,6 +163,8 @@ export class CampusUI implements ModalHost {
     this.compass.append(this.compassStrip, this.compassMark, this.compassDist);
     this.buildCompass();
     this.timerEl = el('div', 'cq-timer');
+    this.sunEl = el('div', 'cq-sunrise');
+    this.sunEl.style.display = 'none';
     this.spotEl = el('div', 'cq-spot', '<b>◉</b><span><i></i></span>');
     this.speedEl = el('div', 'cq-speed', '<div class="cq-speed__n">0</div><div class="cq-speed__u">km/h</div><div class="cq-speed__boost"><i></i></div><div class="cq-speed__hint"></div>');
     this.bannerEl = el('div', 'cq-banner');
@@ -172,7 +175,7 @@ export class CampusUI implements ModalHost {
     miniWrap.append(this.mini, el('div', 'cq-mini__hint', 'M · map'));
     this.promptEl = el('div', 'cq-prompt');
     this.toastEl = el('div', 'cq-toast');
-    this.hud.append(card, stats, this.compass, this.timerEl, this.spotEl, this.speedEl, miniWrap, this.promptEl, this.toastEl, el('div', 'cq-dot'));
+    this.hud.append(card, stats, this.compass, this.sunEl, this.timerEl, this.spotEl, this.speedEl, miniWrap, this.promptEl, this.toastEl, el('div', 'cq-dot'));
     this.callEl = el('button', 'cq-callkart', '🏎 Call Kalki <kbd>K</kbd>');
     this.callEl.onclick = () => this.onCallKart?.();
     this.callEl.style.display = 'none';
@@ -576,6 +579,7 @@ export class CampusUI implements ModalHost {
     this.overlay?.remove();
     this.overlay = null;
     this.keyHandler = null;
+    this.onAbort = null;
     this.modal = false;
   }
 
@@ -597,9 +601,30 @@ export class CampusUI implements ModalHost {
   };
 
   /** Every radio line so far, to read again. */
-  radioLog(entries: RadioLogEntry[], onClose: () => void): void {
-    openRadioLog(this, entries, onClose);
+  radioLog(entries: RadioLogEntry[], onClose: () => void, pin?: PinOptions): void {
+    openRadioLog(this, entries, onClose, pin);
   }
+
+  /** The sunrise clock under the compass: story time and minutes to spare (null hides it). */
+  setSunrise(text: string | null, low: boolean): void {
+    if (text === null) {
+      this.sunEl.style.display = 'none';
+      return;
+    }
+    this.sunEl.style.display = '';
+    if (this.sunEl.textContent !== text) this.sunEl.textContent = text;
+    this.sunEl.classList.toggle('low', low);
+  }
+
+  /**
+   * Ends whatever modal card is open as a failure (a timed puzzle running out). Each card
+   * registers how to do that when it opens.
+   */
+  abortModal(): void {
+    this.onAbort?.();
+  }
+
+  onAbort: (() => void) | null = null;
 
   /**
    * One quiz question with shuffled options. Resolves with whether it was answered
@@ -863,7 +888,7 @@ export class CampusUI implements ModalHost {
     ov.append(box);
   }
 
-  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onTitle: () => void }): void {
+  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onBoard?: (() => void) | null; boardLabel?: string; onTitle: () => void }): void {
     const ov = this.open('cq-overlay--pause');
     const box = el('div', 'cq-title cq-title--small', '<div class="cq-title__name">PAUSED</div>');
     const menu = el('div', 'cq-menu');
@@ -872,6 +897,7 @@ export class CampusUI implements ModalHost {
       ['Campus map', o.onMap, ''],
       ['Garage', o.onGarage, ''],
       ['Missions', o.onMissions, ''],
+      [o.boardLabel ?? '', o.onBoard ?? null, ''],
       ['Goals & badges', o.onProgress, ''],
       ['Radio log', o.onRadioLog, ''],
       ['Restart this mission', o.onRestart, ''],

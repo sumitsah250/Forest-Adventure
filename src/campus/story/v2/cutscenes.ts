@@ -149,6 +149,150 @@ export const CUTSCENES: Partial<Record<CutsceneId, CutsceneDef>> = {
     ],
   },
 
+  // C3, end of mission 3, 10 s: rise above the Power House as the lights come back block by
+  // block, then push in on a campus screen showing the player's face.
+  C3: {
+    shots: [
+      {
+        dur: 4.5,
+        path: [
+          { where: { building: 'Power House' }, off: [-8, 3, 16], local: true },
+          { where: { building: 'Power House' }, off: [-5, 13, 26], local: true },
+          { where: { building: 'Power House' }, off: [0, 30, 44], local: true },
+        ],
+        look: [{ where: { building: 'Power House' }, off: [0, 3, 0] }, { where: { building: 'Power House' }, off: [0, 0, -40], local: true }],
+        ease: 'inOut',
+        sounds: [{ at: 0.3, name: 'power' }],
+        events: [
+          { at: 0.2, do: 'power', value: 1, over: 5 },
+          { at: 2.2, do: 'screens', arg: 'intruder' },
+        ],
+      },
+      {
+        dur: 2,
+        path: [
+          { where: { building: 'Power House' }, off: [0, 30, 44], local: true },
+          { where: { building: 'Power House' }, off: [-3, 14, 22], local: true },
+          { where: { building: 'Power House', beside: -5 }, off: [0, 4, 12], local: true },
+        ],
+        look: { where: { building: 'Power House', beside: -5 }, off: [0, 2.6, 0] },
+        ease: 'inOut',
+      },
+      {
+        dur: 3.5,
+        path: [
+          { where: { building: 'Power House', beside: -5 }, off: [0, 4, 12], local: true },
+          { where: { building: 'Power House', beside: -5 }, off: [0, 3, 6], local: true },
+          { where: { building: 'Power House', beside: -5 }, off: [0, 2.7, 3.4], local: true },
+        ],
+        look: { where: { building: 'Power House', beside: -5 }, off: [0, 2.6, 0] },
+        ease: 'out',
+        fov: [50, 40],
+        sounds: [{ at: 0.4, name: 'speakers' }],
+      },
+    ],
+  },
+
+  // C4, start of mission 5, 8 s: lightning silhouettes the WRC Parapet; mud slides off the bank.
+  C4: {
+    shots: [
+      {
+        dur: 3,
+        path: [
+          { where: { area: 'WRC Parapet' }, off: [-16, 6, 28] },
+          { where: { area: 'WRC Parapet' }, off: [-14, 5, 24] },
+          { where: { area: 'WRC Parapet' }, off: [-12, 4.5, 21] },
+        ],
+        look: { where: { area: 'WRC Parapet' }, off: [0, 3, 0] },
+        ease: 'linear',
+        events: [{ at: 0.6, do: 'lightning' }],
+        sounds: [{ at: 1.6, name: 'thunder' }],
+      },
+      {
+        dur: 5,
+        path: [
+          { where: { area: 'WRC Parapet' }, off: [-12, 4.5, 21] },
+          { where: { area: 'WRC Parapet' }, off: [-9, 3.4, 17] },
+          { where: { area: 'WRC Parapet' }, off: [-7, 2.8, 14] },
+        ],
+        look: { where: { area: 'WRC Parapet' }, off: [3, 2, -3] },
+        ease: 'out',
+        events: [
+          { at: 0.4, do: 'lightning' },
+          { at: 0.8, do: 'mud', place: { where: { area: 'WRC Parapet' }, off: [5, 4, -6] } },
+        ],
+        sounds: [{ at: 0.9, name: 'thunk' }, { at: 1.4, name: 'thunder' }],
+      },
+    ],
+  },
+
+  // C5, end of mission 6, 5 s: Asha's radio portrait breaks into static. Then only rain.
+  C5: {
+    shots: [
+      {
+        dur: 5,
+        path: [
+          { where: { building: 'WRC Library' }, off: [-6, 9, 24], local: true },
+          { where: { building: 'WRC Library' }, off: [-3, 7, 18], local: true },
+          { where: { building: 'WRC Library' }, off: [0, 5.5, 13], local: true },
+        ],
+        look: { where: { building: 'WRC Library' }, off: [0, 3, 0] },
+        ease: 'linear',
+        sounds: [{ at: 0.5, name: 'glitch' }, { at: 1.2, name: 'glitch' }],
+        events: [
+          { at: 0.3, do: 'radioStatic', arg: 'asha', over: 3 },
+          { at: 2.0, do: 'silence', over: 3 },
+        ],
+      },
+    ],
+  },
+
+  // C6, end of mission 7, 12 s: the relay comes out; every drone drops a metre, hangs, and lights
+  // up blue. MITRA's memory types on screen.
+  C6: {
+    shots: [
+      {
+        dur: 3,
+        path: [
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [3.5, 1.8, 4] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [3, 1.5, 3.2] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [2.4, 1.3, 2.6] },
+        ],
+        look: { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [0, 1.2, 0] },
+        ease: 'out',
+        sounds: [{ at: 0.4, name: 'unlock' }],
+        events: [{ at: 0, do: 'drones', value: 4, place: { where: { point: 'Saraswati Temple', dx: -6, dz: 5 } } }],
+      },
+      {
+        dur: 4,
+        path: [
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [11, 5, 15] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [13, 6, 16] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [15, 7, 17] },
+        ],
+        look: { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [0, 7, 0] },
+        ease: 'linear',
+        sounds: [{ at: 0.5, name: 'powerDown' }, { at: 1.9, name: 'chirp' }],
+        events: [{ at: 0.5, do: 'dronesBlue' }],
+      },
+      {
+        dur: 5,
+        path: [
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [15, 7, 17] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [12, 8, 13] },
+          { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [9, 9, 10] },
+        ],
+        look: { where: { point: 'Saraswati Temple', dx: -6, dz: 5 }, off: [0, 7, 0] },
+        ease: 'inOut',
+        subtitles: [
+          { at: 0.3, who: 'mitra', text: T.m7.c6Mitra, dur: 2.3 },
+          { at: 2.7, who: 'mitra', text: T.m7.c6Mitra2, dur: 2.2 },
+        ],
+        events: [{ at: 4.9, do: 'drones', value: 0 }],
+      },
+    ],
+  },
+
   // C2, middle of mission 1, 6 s: Asha pulls the tarp off Kalki. Headlight on. Low orbit.
   C2: {
     shots: [

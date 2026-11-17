@@ -16,8 +16,13 @@ import { Beacon, CheckRing, Drone, animateItem, coinModel, itemModel } from './a
 import { choose, heartsLabel, runPuzzle } from './minigames.ts';
 import { has, levelOf, saveProfile, starsFor, type Profile } from './profile.ts';
 import type { GoalEvent } from './meta.ts';
+import type { ClueBook } from './clues.ts';
+import { dressExtras } from './props.ts';
+import { QUIET_CLUES, STORY_VERSION, V2_TEXT } from './story.ts';
 
 const MAX_HEARTS = 3;
+/** Seconds before fading clues are gone (mission 4). */
+const FADE_TIME = 90;
 const REACH = 2.9;
 
 /**
@@ -135,6 +140,17 @@ export interface MissionContext {
   onBegin?: (index: number, step: number) => void;
   /** "7:50 PM, CAFETERIA" at the start of a mission. */
   locationCard?: (clock: string, place: string) => void;
+  /** Story 2's clue book (gold and silver cards). */
+  clues?: ClueBook;
+  /** Opens the evidence board (read-only) and resolves when it is closed. */
+  board?: () => Promise<void>;
+  /** A drone cutting a door: where the door is, and how far through (0..1); null ends it. */
+  doorCut?: (door: { x: number; z: number; facing: number } | null, progress: number) => void;
+  /**
+   * During a conversation: lets the player tap the person (or press F) to look closer and find a
+   * clue. Returns a function that removes the hotspot.
+   */
+  lookCloser?: (p: Person, onFound: () => void) => () => void;
   /** A drone's alarm passed 60%: MITRA's spotted line and the alarm stinger (main rate-limits them). */
   spotted?: () => void;
 }
@@ -189,6 +205,16 @@ export class Missions {
   /** A drone's alarm went high without catching the player (a close call when it drops). */
   private closeCall = false;
   private tmp = new THREE.Vector3();
+  /** Seconds left on a puzzle against the clock (null: none), and whether it ran out with the card open. */
+  private puzzleTimer: number | null = null;
+  private timedOut = false;
+  /** How long E has been held on a hold step. */
+  private holdT = 0;
+  /** Seconds into a fading collect step (-1: none), and the materials that fade. */
+  private fadeT = -1;
+  private fadeMats: THREE.MeshStandardMaterial[] = [];
+  /** 0..1: how much a fading step has turned the drizzle into a downpour (main reads it). */
+  rainBoost = 0;
   private locationPending = false;
   private alarmHigh = false;
   /** Floor height for people and items (steps, landings and terraces included). */
@@ -207,6 +233,7 @@ export class Missions {
     for (const n of NPCS) {
       const s = this.resolve(n.at, n.name);
       const p = new Person(c.scene, n.outfit, this.surface, c.physics, s.x, s.z, s.facing, n.name);
+      if (n.extras) dressExtras(p.rig, n.extras);
       const collider = postGroups(c.physics.addCylinder(s.x, p.pos.y, s.z, 0.85, 0.32));
       this.npcs.set(n.id, { p, collider, home: s });
     }
@@ -287,6 +314,8 @@ export class Missions {
     if (step === 0 && d.kartAt && !this.c.inKart()) this.c.placeKart?.(d.kartAt.x, d.kartAt.z, d.kartAt.heading);
     this.c.onSky(d.sky);
     this.c.onBegin?.(index, step);
+    // Mission 9: the quiet clues the player never found turn up silver on the board, unannounced.
+    if (d.id === 'v2-whodunit') for (const q of QUIET_CLUES) this.c.clues?.find(q, 'silver', false);
     // The location card appears with the first step that is not a cutscene.
     this.locationPending = !!d.location;
     const epoch = this.epoch;
@@ -421,6 +450,13 @@ export class Missions {
     this.riddle = null;
     this.timer = null;
     this.alarm = 0;
+    this.puzzleTimer = null;
+    this.timedOut = false;
+    this.holdT = 0;
+    this.fadeT = -1;
+    this.fadeMats = [];
+    this.rainBoost = 0;
+    this.c.doorCut?.(null, 0);
     this.c.ui.setTimer(null);
     this.c.ui.setSpotted(0);
   }
@@ -448,6 +484,14 @@ export class Missions {
         this.c.sound('radioBeep');
         await this.c.ui.dialog(v.name, v.role, st.lines, st.from);
         this.busy = false;
+        if (st.clue) this.c.clues?.find(st.clue, 'gold');
+        if (st.pin) {
+          // Mark the line in the radio log, so pinning it to the board finds the clue.
+          const log = this.c.profile.radioLog;
+          const e = log[log.length - st.lines.length + st.pin.line];
+          if (e) e.clue = st.pin.clue;
+          saveProfile(this.c.profile);
+        }
         if (epoch === this.epoch) await this.advance();
         return;
       }
@@ -457,9 +501,37 @@ export class Missions {
         this.c.sound('paper');
         await this.c.ui.dialog(st.title, 'document', st.lines);
         this.busy = false;
+        if (st.clue) this.c.clues?.find(st.clue, 'gold');
         if (epoch === this.epoch) await this.advance();
         return;
       }
+      case 'board': {
+        this.busy = true;
+        await this.c.board?.();
+        this.busy = false;
+        if (epoch === this.epoch) await this.advance();
+        return;
+      }
+      case 'run': {
+        // The character bolts for the place and stays there; the player sees it (the clue).
+        this.busy = true;
+        const n = this.npcs.get(st.npc);
+        const to = this.resolve(st.to, st.npc);
+        if (n) {
+          this.c.physics.removeCollider(n.collider);
+          n.p.runTo(to.x, to.z, 5.2);
+        }
+        if (st.clue) this.c.clues?.find(st.clue, 'gold');
+        await new Promise<void>((r) => window.setTimeout(r, 2600));
+        if (n) n.collider = postGroups(this.c.physics.addCylinder(to.x, this.surface.heightAt(to.x, to.z), to.z, 0.85, 0.32));
+        n?.p.place(to.x, to.z, to.facing);
+        this.busy = false;
+        if (epoch === this.epoch) await this.advance();
+        return;
+      }
+      case 'hold':
+        await this.spawnDevice(st.at, st.label, st.model, epoch);
+        break;
       case 'cutscene': {
         this.busy = true;
         if (this.c.cutscene) await this.c.cutscene(st.id);
@@ -482,6 +554,16 @@ export class Missions {
         this.timer = st.time ?? null;
         const objs = await Promise.all(st.items.map((it) => itemModel(it.model)));
         if (epoch !== this.epoch) return;
+        if (st.fade) {
+          // Fading clues: every material of the items goes see-through, faded as the rain grows.
+          this.fadeT = 0;
+          for (const o of objs) o.traverse((m) => {
+            const mat = (m as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+            if (!mat || this.fadeMats.includes(mat)) return;
+            mat.transparent = true;
+            this.fadeMats.push(mat);
+          });
+        }
         st.items.forEach((def, i) => {
           const spot = this.resolve(def.at, def.label, true);
           const obj = objs[i];
@@ -574,6 +656,16 @@ export class Missions {
       case 'choose':
         break;
     }
+    // Searchlight drones sweep around each item of a collect step.
+    if (st.kind === 'collect' && st.drones && epoch === this.epoch) {
+      this.items.slice(0, st.drones).forEach((it, i) => {
+        const drone = new Drone(3.2);
+        this.stepGroup.add(drone.obj, drone.light);
+        this.patrols.push({ drone, cx: it.spot.x, cz: it.spot.z, r: 5 + (i % 2) * 1.5, w: (i % 2 ? -1 : 1) * 0.45, phase: i * 2.1 });
+      });
+    }
+    if (st.kind === 'puzzle' && st.time) this.puzzleTimer = st.time;
+    if (st.kind === 'hold') this.holdT = 0;
     if (epoch === this.epoch) this.scatterCoins();
     this.resnapIn = 2;
     this.refreshHud();
@@ -670,6 +762,8 @@ export class Missions {
   }
 
   private async failed(): Promise<void> {
+    // The sunrise clock: a failed mission costs 3 minutes (never below 0).
+    if (STORY_VERSION === 2) this.c.profile.minutes = Math.max(0, this.c.profile.minutes - 3);
     this.busy = true;
     this.clearStep();
     await this.c.ui.message('Mission failed', 'You ran out of hearts. Every mission can be retried — the puzzles and questions change each time.', 'Retry mission', 'bad');
@@ -677,12 +771,34 @@ export class Missions {
     await this.begin(this.index, 0, this.replay);
   }
 
+  /** Par time; mission 10's tightens by 20% once the sunrise clock has no minutes to spare. */
+  parOf(d: MissionDef): number {
+    return d.id === 'v2-sunrise' && this.c.profile.minutes <= 0 ? Math.round(d.par * 0.8) : d.par;
+  }
+
   private async complete(): Promise<void> {
     const d = this.def!;
     const p = this.c.profile;
     const index = this.index;
     const seconds = Math.round(this.seconds);
-    const stars = starsFor(this.heartsLost, seconds, d.par);
+    const book = this.c.clues;
+    // Clues missed in this mission: Asha hands them over as silver cards (never the quiet ones).
+    if (book) {
+      const missed = book.missedForAsha(d.id, QUIET_CLUES);
+      if (missed.length) {
+        this.busy = true;
+        this.c.sound('radioBeep');
+        await this.c.ui.dialog('Asha', 'on the radio', missed.map((c) => V2_TEXT.ashaFound[c.id] ?? c.text), 'asha');
+        for (const c of missed) book.find(c.id, 'silver');
+        this.busy = false;
+      }
+    }
+    // Stars: finish, no hearts lost, and par time (in a clue mission: every clue found gold).
+    const par = this.parOf(d);
+    const third = book && book.isClueMission(d.id) ? book.allGold(d.id) : seconds <= par;
+    const stars = book ? 1 + (this.heartsLost === 0 ? 1 : 0) + (third ? 1 : 0) : starsFor(this.heartsLost, seconds, d.par);
+    // The sunrise clock: beating par adds a minute.
+    if (book && seconds <= par) p.minutes += 1;
     const prevStars = p.stars[d.id] ?? 0;
     const first = index >= p.story && !this.replay;
     const levelBefore = levelOf(p.xp).level;
@@ -802,10 +918,15 @@ export class Missions {
         ui.setObjective(`“${st.riddle}”`, sub);
         break;
       }
+      case 'hold':
+        ui.setObjective(st.obj, st.prompt);
+        break;
       case 'radio':
       case 'read':
       case 'cutscene':
       case 'stub':
+      case 'board':
+      case 'run':
         break;
     }
   }
@@ -859,10 +980,14 @@ export class Missions {
         const r = this.riddle;
         return r && r.hint >= 2 ? { main: { x: r.spot.x, z: r.spot.z, label: st.label }, extra: [] } : { main: null, extra: [] };
       }
+      case 'hold':
+        return this.device ? { main: { x: this.device.spot.x, z: this.device.spot.z, label: st.label }, extra: [] } : { main: null, extra: [] };
       case 'radio':
       case 'read':
       case 'cutscene':
       case 'stub':
+      case 'board':
+      case 'run':
         return { main: null, extra: [] };
     }
   }
@@ -872,7 +997,7 @@ export class Missions {
 
   // ------------------------------------------------------------------ per frame
 
-  update(dt: number, playing: boolean, focus: THREE.Vector3, interactPressed: boolean, kartPos: THREE.Vector3 | null): void {
+  update(dt: number, playing: boolean, focus: THREE.Vector3, interactPressed: boolean, kartPos: THREE.Vector3 | null, interactHeld = false): void {
     this.focus.copy(focus);
     const t = performance.now() / 1000;
     if (playing && this.resnapIn > 0 && --this.resnapIn === 0) this.resnap();
@@ -883,7 +1008,54 @@ export class Missions {
     if (live) this.seconds += dt;
     const inKart = this.c.inKart();
 
-    for (const it of this.items) if (!it.got) animateItem(it.obj, t, it.index);
+    for (const it of this.items) {
+      if (it.got) continue;
+      animateItem(it.obj, t, it.index);
+      // Clue objects sparkle softly within 6 m.
+      if (it.def.clue) {
+        const glow = it.obj.getObjectByName('glow');
+        if (glow) glow.scale.setScalar(Math.hypot(focus.x - it.spot.x, focus.z - it.spot.z) < 6 ? 1.6 + Math.sin(t * 7 + it.index) * 0.45 : 1);
+      }
+    }
+    // Fading clues: gone after 90 s of play, as the rain grows (missed ones come back silver from Asha).
+    if (this.fadeT >= 0 && playing && !this.busy) {
+      this.fadeT += dt;
+      const f = Math.min(1, this.fadeT / FADE_TIME);
+      this.rainBoost = f;
+      for (const m of this.fadeMats) m.opacity = 1 - f * f;
+      if (f >= 1) {
+        this.fadeT = -1;
+        for (const it of this.items) if (!it.got) {
+          it.got = true;
+          it.obj.visible = false;
+        }
+        const st0 = this.stepDef;
+        if (st0?.kind === 'collect') {
+          this.c.ui.toast(st0.obj, 'bad');
+          void this.advance();
+          return;
+        }
+      }
+    }
+    // A puzzle against the clock keeps counting while its card is open (M3: the drone at the door).
+    const pst = this.stepDef;
+    if (this.puzzleTimer !== null && pst?.kind === 'puzzle' && pst.time && (playing || this.busy)) {
+      this.puzzleTimer -= dt;
+      this.c.ui.setTimer(this.puzzleTimer);
+      if (pst.cutDoor) {
+        const door = this.resolve(pst.cutDoor, 'door');
+        this.c.doorCut?.(door, 1 - Math.max(0, this.puzzleTimer) / pst.time);
+      }
+      if (this.puzzleTimer <= 0) {
+        this.puzzleTimer = null;
+        if (this.busy) {
+          // The card is open: end it as a failure (useDevice takes the heart once).
+          this.timedOut = true;
+          this.c.ui.abortModal();
+        } else if (!this.loseHeart(V2_TEXT.clueUi.doorCut)) void this.enterStep();
+        return;
+      }
+    }
     if (this.device) animateItem(this.device.obj, t, 0);
 
     // Combo chain decays; bonus coins spin and get picked up; the three-star clock.
@@ -910,7 +1082,7 @@ export class Missions {
     }
     const d = this.def;
     if (d) this.c.ui.setCoins(this.c.profile.coins + this.earned);
-    if (d) this.c.ui.setPar({ left: d.par - this.seconds, hearts: this.heartsLost === 0, vsBest: this.split });
+    if (d) this.c.ui.setPar({ left: this.parOf(d) - this.seconds, hearts: this.heartsLost === 0, vsBest: this.split });
     else this.c.ui.setPar(null);
 
     // Beacon over the objective.
@@ -948,6 +1120,7 @@ export class Missions {
           break;
         }
         case 'collect': {
+          if (this.patrols.length) this.updateDrones(dt, t, focus, inKart);
           for (const it of this.items) {
             if (it.got) continue;
             const d = d2(it.spot.x, it.spot.z);
@@ -1067,10 +1240,34 @@ export class Missions {
           if (r.seen && !inKart && d < REACH) prompt = `Take: ${st.label}`;
           break;
         }
+        case 'hold': {
+          if (this.patrols.length) this.updateDrones(dt, t, focus, inKart);
+          if (!this.device || d2(this.device.spot.x, this.device.spot.z) > REACH + 0.4) {
+            this.holdT = Math.max(0, this.holdT - dt * 2);
+            break;
+          }
+          if (inKart) {
+            prompt = 'Get out of Kalki to use it (E)';
+            break;
+          }
+          this.holdT = interactHeld ? this.holdT + dt : Math.max(0, this.holdT - dt * 2);
+          prompt = `${st.prompt} · ${Math.round(Math.min(1, this.holdT / st.seconds) * 100)}%`;
+          if (this.holdT >= st.seconds) {
+            this.c.sound('unlock');
+            this.c.moment?.('solved');
+            this.c.reward?.(this.at(this.device.spot.x, this.device.spot.z), 'big', this.chain(30));
+            this.device.obj.visible = false;
+            void this.advance();
+            return;
+          }
+          break;
+        }
         case 'radio':
         case 'read':
         case 'cutscene':
         case 'stub':
+        case 'board':
+        case 'run':
           break;
       }
       // Step timer (drive and chase only count while in Kalki; the chase once it has started).
@@ -1113,11 +1310,22 @@ export class Missions {
     this.c.ui.setSpotted(alarm);
     if (alarm > 0.5) this.bonusFail('unseen');
     this.watchClose(alarm, focus.x, focus.z);
-    if (alarm >= 1 && this.device) {
+    // The patrol's centre: the device, or (sweeping drones on a collect step) the nearest item left.
+    let s: Spot | null = this.device?.spot ?? null;
+    if (!s) {
+      let best = Infinity;
+      for (const it of this.items) {
+        const dd = Math.hypot(it.spot.x - focus.x, it.spot.z - focus.z);
+        if (!it.got && dd < best) {
+          best = dd;
+          s = it.spot;
+        }
+      }
+    }
+    if (alarm >= 1 && s) {
       for (const pt of this.patrols) pt.drone.alarm = 0;
       if (this.loseHeart('Spotted by a drone!')) return;
       // Back to the edge of the patrol zone, on the side the player came from.
-      const s = this.device.spot;
       let dx = focus.x - s.x;
       let dz = focus.z - s.z;
       const l = Math.hypot(dx, dz) || 1;
@@ -1216,6 +1424,7 @@ export class Missions {
     it.got = true;
     it.obj.visible = false;
     this.c.sound('pickup');
+    if (it.def.clue) this.c.clues?.find(it.def.clue, 'gold');
     const bonus = this.chain(5);
     this.c.reward?.(this.at(it.spot.x, it.spot.z), 'medium', bonus);
     this.c.ui.toast(`${it.def.label} ✓  +${bonus}◈`, 'good');
@@ -1234,9 +1443,15 @@ export class Missions {
     try {
       if (st.kind === 'talk') {
         const n = NPCS.find((x) => x.id === st.npc)!;
-        this.c.converse?.(this.npcs.get(st.npc)?.p ?? null);
+        const person = this.npcs.get(st.npc)?.p ?? null;
+        this.c.converse?.(person);
+        // A quiet clue on the person (c1): tap them, or press F, during the conversation.
+        const lc = st.lookCloser;
+        const remove = lc && person && this.c.lookCloser ? this.c.lookCloser(person, () => this.c.clues?.find(lc, 'gold')) : null;
         await this.c.ui.dialog(n.name, n.role, st.lines, st.npc);
+        remove?.();
         this.c.converse?.(null);
+        if (st.clue) this.c.clues?.find(st.clue, 'gold');
         if (epoch === this.epoch) await this.advance();
       } else if (st.kind === 'quiz') {
         await this.quiz(st);
@@ -1268,10 +1483,15 @@ export class Missions {
     try {
       if (st.kind === 'puzzle') {
         const ok = await runPuzzle(this.c.ui, st.puzzle, heartsLabel(this.hearts, MAX_HEARTS));
-        if (ok) {
+        if (ok && !this.timedOut) {
           const got = this.chain(30);
           if (this.device) this.c.reward?.(this.at(this.device.spot.x, this.device.spot.z), 'big', got);
           if (epoch === this.epoch) await this.advance();
+        } else if (this.timedOut) {
+          // The countdown ran out with the card open: one heart, and the step starts again.
+          this.timedOut = false;
+          this.busy = false;
+          if (!this.loseHeart(V2_TEXT.clueUi.doorCut) && epoch === this.epoch) await this.enterStep();
         } else {
           this.bonusFail('noMiss');
           this.loseHeart('Puzzle failed');

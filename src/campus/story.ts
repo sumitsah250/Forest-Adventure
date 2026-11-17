@@ -10,7 +10,7 @@
 import * as v1 from './story/v1.ts';
 import * as v2 from './story/v2/index.ts';
 import { CUTSCENES as V2_CUTSCENES } from './story/v2/cutscenes.ts';
-import type { ClueDef, CutsceneDef } from './story/types.ts';
+import type { ClueDef, ClueId, CutsceneDef } from './story/types.ts';
 
 export type { Anchor, ClueDef, ClueId, CutEvent, CutsceneDef, CutsceneId, Ease, ItemDef, ItemModel, MissionDef, NpcDef, PuzzleDef, ShotDef, Sky, Step, TodoId, Where } from './story/types.ts';
 export { KART_HOME, TRIAL_MEDALS, TRIAL_ROUTE } from './story/routes.ts';
@@ -36,6 +36,11 @@ export const STORY_VERSION: 1 | 2 = pickVersion();
 export const V2_TEXT = v2.T;
 /** The clues (story 2; story 1 has none). */
 export const CLUES: ClueDef[] = STORY_VERSION === 2 ? v2.CLUES : [];
+/** Clues never announced (c1, c2): silver at the start of mission 9 if missed. */
+export const QUIET_CLUES: ClueId[] = v2.QUIET_CLUES;
+/** The accusation in mission 9: questions, the clues each accepts, and what clears the innocent. */
+export const ACCUSATION = v2.ACCUSATION;
+export const WRONG_ACCUSATION = v2.WRONG_ACCUSATION;
 
 const story = STORY_VERSION === 2 ? v2 : v1;
 

@@ -3,7 +3,7 @@
 // console as sbasnet, switched to agurung and pushed two bugs from a red pen drive.
 //
 // A clue found by the player is a gold card; one Asha "finds" at mission end is silver.
-// (Finding and saving clues is TODO_P5_CLUE_TRACKING; this file is the data it will use.)
+// Finding and saving clues: src/campus/clues.ts.
 
 import type { ClueDef, ClueId } from '../types.ts';
 
@@ -21,7 +21,11 @@ export const CLUES: ClueDef[] = [
   { id: 'c11', mission: 'v2-whodunit', title: 'Guard register', text: 'Sunil signed out at 6:30, but his motorbike is still in the motorcycle parking.', pointsTo: 'sunil', role: 'evidence' },
   { id: 'c12', mission: 'v2-whodunit', title: 'Console log', text: 'Login sbasnet, switch to agurung, both bugs pushed at 6:55.', pointsTo: 'sunil', role: 'evidence' },
   { id: 'c13', mission: null, minigame: 'chiya-rush', title: 'Cafeteria gossip', text: 'Krishna Dai heard that Sunil\'s contract ends this month: MITRA replaces his paid system.', pointsTo: 'sunil', role: 'evidence' },
+  { id: 'c14', mission: 'v2-witness', title: 'Red pen-drive cap', text: 'A red pen-drive cap by the NESS WRC steps, on the same path as the yellow strap.', pointsTo: 'sunil', role: 'evidence' },
 ];
+
+/** Clues that are never announced: no dialogue gives them; if missed they turn up silver at the start of mission 9. */
+export const QUIET_CLUES: ClueId[] = ['c1', 'c2'];
 
 /**
  * The accusation in mission 9 (TODO_P6_EVIDENCE_BOARD_ACCUSE): three questions, and the clues
@@ -29,7 +33,7 @@ export const CLUES: ClueDef[] = [
  */
 export const ACCUSATION: { question: string; accepts: ClueId[] }[] = [
   { question: 'Who could reach the exam console at 6:55?', accepts: ['c4', 'c11'] },
-  { question: 'Whose hands were on the keyboard?', accepts: ['c1', 'c12'] },
+  { question: 'Whose hands were on the keyboard?', accepts: ['c1', 'c12', 'c14'] },
   { question: 'Who knew too much, or had a reason?', accepts: ['c2', 'c13'] },
 ];
 

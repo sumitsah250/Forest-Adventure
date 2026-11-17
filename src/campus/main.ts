@@ -26,13 +26,16 @@ import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
 import { Extras } from './extras.ts';
-import { CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky } from './story.ts';
+import { CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky, type Where } from './story.ts';
 import { LocationCard, addToBoard, leaderboard, nameEntry } from './screens.ts';
 import { DebugPanel } from './debug.ts';
 import { Cutscenes } from './cutscene.ts';
 import { Subtitles } from './dialogue.ts';
 import { Portraits } from './portraits.ts';
-import { DroneEyes, Tarp, festBanner } from './props.ts';
+import { CampusScreens, DoorCut, DroneEyes, MudSlide, Tarp, festBanner } from './props.ts';
+import { ClueBook } from './clues.ts';
+import { openBoard } from './evidence.ts';
+import { createPlayerHumanoid } from '../character/playerModel.ts';
 import { CheckRing, Drone, coinModel, itemModel, shardModel } from './actors.ts';
 import { Cinema, type Shot } from './cinema.ts';
 import { Fireflies, Lightning, Rain, Sparks } from './fx.ts';
@@ -242,7 +245,41 @@ async function boot(): Promise<void> {
   };
   const tarp = new Tarp();
   const droneEyes = new DroneEyes();
-  scene.add(tarp.obj, droneEyes.group);
+  const doorCut = new DoorCut();
+  const mud = new MudSlide();
+  scene.add(tarp.obj, droneEyes.group, doorCut.obj, mud.obj);
+  // Clues (story 2): gold and silver cards.
+  const clueBook = STORY_VERSION === 2 ? new ClueBook(uiRoot, CLUES, profile, V2_TEXT.clueUi, (n) => audio.play(n), () => saveProfile(profile)) : null;
+  // C5: Asha's radio portrait breaking into static.
+  const staticEl = document.createElement('div');
+  staticEl.className = 'cq-static';
+  uiRoot.append(staticEl);
+  // M2: "look closer" at a person during a conversation (clue c1). A hotspot over their chest.
+  const lookEl = document.createElement('button');
+  lookEl.className = 'cq-look';
+  lookEl.type = 'button';
+  lookEl.setAttribute('aria-label', V2_TEXT.clueUi.lookCloser);
+  lookEl.innerHTML = `<span>${V2_TEXT.clueUi.lookCloser} <kbd>F</kbd></span>`;
+  uiRoot.append(lookEl);
+  let lookAt: { pos: THREE.Vector3; found: () => void } | null = null;
+  const lookV = new THREE.Vector3();
+  const lookFound = () => {
+    if (!lookAt) return;
+    const l = lookAt;
+    lookAt = null;
+    lookEl.classList.remove('on');
+    // The camera glances down at the lanyard for a moment.
+    cinema.talk(camera.position.clone(), new THREE.Vector3(l.pos.x, l.pos.y + 1.25, l.pos.z), camera);
+    audio.play('click');
+    window.setTimeout(() => l.found(), 500);
+  };
+  lookEl.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    lookFound();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyF' && lookAt) lookFound();
+  });
   if (FEST_BANNER) scene.add(festBanner(world.gate, FEST_BANNER.title, FEST_BANNER.sub));
   const rain = new Rain(touchDevice ? 700 : 1600);
   const sparks = new Sparks(600);
@@ -308,7 +345,25 @@ async function boot(): Promise<void> {
 
   // ------------------------------------------------------------------ campus power
   /** Share of campus with its power back: grows with the story, lights windows at night. */
-  const powerFor = () => powerLevel(profile.story);
+  // The sunrise clock: story clock strings ("7:30 PM") as minutes, ordered through midnight.
+  const clockMinutes = (c: string) => {
+    const m = /(\d+):(\d+)\s*(AM|PM)/.exec(c);
+    if (!m) return 0;
+    let h = Number(m[1]) % 12;
+    if (m[3] === 'PM') h += 12;
+    else h += 24;
+    return h * 60 + Number(m[2]);
+  };
+  const clockString = (min: number) => {
+    const h24 = Math.floor(min / 60) % 24;
+    const h = h24 % 12 === 0 ? 12 : h24 % 12;
+    return `${h}:${String(min % 60).padStart(2, '0')} ${h24 < 12 ? 'AM' : 'PM'}`;
+  };
+  let shownStoryMin = -2;
+  let shownMinutes = -1;
+  /** A cutscene may switch the power on mid-mission (C3); it holds until the next mission starts. */
+  let powerHold: number | null = null;
+  const powerFor = () => powerHold ?? powerLevel(profile.story);
   let powerShown = powerFor();
   let powerTo = powerShown;
   /** How fast the power level moves to its target (per second), and a floor for window glow before full dark (cutscenes set both). */
@@ -512,7 +567,26 @@ async function boot(): Promise<void> {
       extras.refresh();
     },
     onComplete: (r) => afterMission(r),
+    clues: clueBook ?? undefined,
+    board: () => openBoardView(),
+    doorCut: (door, p) => {
+      if (!door) {
+        doorCut.set(0, 0, 0, 0, null);
+        return;
+      }
+      doorCut.set(door.x, ground.heightAt(door.x, door.z), door.z, door.facing, p);
+    },
+    lookCloser: (p, onFound) => {
+      lookAt = { pos: p.pos, found: onFound };
+      lookEl.classList.add('on');
+      return () => {
+        lookAt = null;
+        lookEl.classList.remove('on');
+      };
+    },
     onBegin: (index) => {
+      powerHold = null;
+      updateScreens();
       gateTo = gateOpen = gateFor(index);
       world.gate.setOpen(gateOpen);
     },
@@ -567,6 +641,24 @@ async function boot(): Promise<void> {
       powerTo = v;
     },
     glow: (e) => (glowMin = e.value ?? 0),
+    screens: (e) => {
+      screensForced = (e.arg as 'intruder' | 'reopened' | 'hero' | 'off') ?? null;
+      updateScreens();
+    },
+    lightning: () => lightning.strike(),
+    mud: (_e, at) => {
+      if (at) mud.start(at, -0.53, 0.85);
+    },
+    radioStatic: (e) => {
+      const url = portraits.get(e.arg ?? 'asha');
+      staticEl.innerHTML = url ? `<img src="${url}" alt="">` : '';
+      staticEl.classList.remove('on');
+      void staticEl.offsetWidth;
+      staticEl.classList.add('on');
+      window.setTimeout(() => staticEl.classList.remove('on'), (e.over ?? 3) * 1000);
+    },
+    silence: () => undefined,
+    dronesBlue: () => droneEyes.turnBlue(),
     drones: (e, at) => droneEyes.show(e.value ?? 0, at),
     tarp: (e) => (e.arg === 'on' ? tarp.cover(kart.position, kart.heading) : tarp.pull()),
     headlights: (e) => kart.vehicle.setLights(!!e.value),
@@ -609,6 +701,7 @@ async function boot(): Promise<void> {
     end: () => {
       touch?.setVisible(state === 'play');
       // Back to what the story says the lights should be.
+      if (powerTo > 0.5 && STORY_VERSION === 2 && missions.def?.id === 'v2-backup-power') powerHold = 1;
       powerTo = powerFor();
       powerRate = 0.05;
       glowMin = 0;
@@ -892,10 +985,66 @@ async function boot(): Promise<void> {
   const openRadioLog = (onClose: () => void) => {
     const prev = state;
     state = 'menu';
+    const t = V2_TEXT.clueUi;
     ui.radioLog(profile.radioLog, () => {
       state = prev === 'menu' ? 'title' : prev;
       onClose();
+    }, STORY_VERSION === 2 ? {
+      label: t.pin,
+      done: t.pinned,
+      // Pinning a line to the board: only a line that proves something becomes a clue (c2).
+      onPin: (e) => {
+        if (!has(profile, 'board')) return t.pinLocked;
+        if (!e.clue) return t.pinNothing;
+        e.pinned = true;
+        clueBook?.find(e.clue as 'c2', 'gold');
+        saveProfile(profile);
+        return clueBook?.def(e.clue)?.title ?? '';
+      },
+    } : undefined);
+  };
+
+  /** The evidence board, read-only. */
+  const openBoardView = () => openBoard(ui, {
+    clues: CLUES,
+    state: (id) => profile.clues[id] ?? null,
+    name: (id) => NPCS.find((n) => n.id === id)?.name ?? id,
+    portrait: (id) => portraits.get(id),
+    text: V2_TEXT.clueUi,
+    sound: (n) => audio.play(n),
+    mode: 'view',
+  });
+  const openBoardMenu = (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    void openBoardView().then(() => {
+      state = prev === 'menu' ? 'title' : prev;
+      onClose();
     });
+  };
+
+  // ------------------------------------------------------------------ campus screens (story 2)
+  /** A cutscene can switch the screens before the story does (C3). */
+  let screensForced: 'intruder' | 'reopened' | 'hero' | 'off' | null = null;
+  const screens = STORY_VERSION === 2
+    ? new CampusScreens(([
+        { building: 'Research and Innovation Centre (RIC)', beside: -6 },
+        { point: 'Administration Block' },
+        { point: 'Cafeteria', outside: 'wall', beside: -4 },
+        { building: 'Power House', beside: -5 },
+      ] as Where[]).map((w) => {
+        const s = missions.resolve(w, 'screen');
+        return { x: s.x, y: ground.heightAt(s.x, s.z), z: s.z, facing: s.facing };
+      }))
+    : null;
+  if (screens) scene.add(screens.group);
+  const updateScreens = () => {
+    if (!screens) return;
+    const s = profile.story;
+    const mode = screensForced ?? (s >= 10 ? 'hero' : s >= 9 ? 'reopened' : s >= 3 ? 'intruder' : 'off');
+    const t = V2_TEXT.clueUi;
+    const label = mode === 'hero' ? t.screenHero : mode === 'reopened' ? t.screenReopened : t.screenIntruder;
+    screens.show(mode, portraits.canvas('player'), profile.name || 'Student', profile.roll, label);
   };
 
   const openPause = () => {
@@ -914,6 +1063,8 @@ async function boot(): Promise<void> {
       onMissions: () => openMissions(back),
       onProgress: () => openProgress(back),
       onRadioLog: () => openRadioLog(back),
+      onBoard: STORY_VERSION === 2 && has(profile, 'board') ? () => openBoardMenu(back) : null,
+      boardLabel: V2_TEXT.clueUi.boardTitle,
       onRestart: missions.def ? () => void missions.restart().then(play) : null,
       onTitle: toTitle,
     });
@@ -948,7 +1099,8 @@ async function boot(): Promise<void> {
   // props, drones, rings, hidden interiors) is compiled now, behind the loading screen, so
   // nothing stalls the first time it appears in play.
   progress(0.97, 'Warming up the shaders');
-  portraits.makeAll(NPCS);
+  portraits.makeAll([...NPCS, { id: 'player', make: () => createPlayerHumanoid(PLAYER_SUIT), keep: true }]);
+  updateScreens();
   {
     const warm = new THREE.Group();
     const kinds: ItemModel[] = ['book', 'cube', 'breaker', 'usb', 'toolbox', 'gnss', 'torch', 'sandbag', 'evidence', 'module', 'part', 'panel', 'relay'];
@@ -1050,7 +1202,7 @@ async function boot(): Promise<void> {
         stats: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mission: missions.def ? `${missions.index + 1}/${MISSION_COUNT} step ${missions.step + 1}` : 'free roam' }),
       })
     : null;
-  (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, enterKart, exitKart, get mode() { return mode; } };
+  (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, clues: clueBook, board: () => openBoardView(), cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, enterKart, exitKart, get mode() { return mode; } };
 
   let last = performance.now();
   let acc = 0;
@@ -1194,6 +1346,28 @@ async function boot(): Promise<void> {
     debug?.frame(now);
     document.body.classList.toggle('cq-cinematic', cinema.active || cutscenes.playing);
     tarp.update(rdt);
+    mud.update(rdt);
+    // The drone cutting the Power House door: sparks from the tip of the cut.
+    if (doorCut.obj.visible && Math.random() < 0.7) {
+      sv.set((Math.random() - 0.5) * 3, 1 + Math.random() * 2.5, (Math.random() - 0.5) * 3);
+      sparks.emit(doorCut.tip, sv, GOLD, 0.35 + Math.random() * 0.3, 9);
+      if (Math.random() < 0.08) audio.play('cutting', doorCut.tip);
+    }
+    // "Look closer": keep the hotspot over the person's chest.
+    if (lookAt) {
+      lookV.set(lookAt.pos.x, lookAt.pos.y + 1.25, lookAt.pos.z).project(camera);
+      lookEl.style.transform = `translate(${((lookV.x + 1) / 2) * window.innerWidth}px, ${((1 - lookV.y) / 2) * window.innerHeight}px)`;
+    }
+    // The sunrise clock (story 2): story time and minutes to spare, redrawn when either changes.
+    if (STORY_VERSION === 2 && state === 'play') {
+      const d = missions.def;
+      const storyMin = d ? clockMinutes(d.clock) + Math.floor(missions.seconds / 6) : -1;
+      if (storyMin !== shownStoryMin || profile.minutes !== shownMinutes) {
+        shownStoryMin = storyMin;
+        shownMinutes = profile.minutes;
+        ui.setSunrise(d ? `${clockString(storyMin)} · ${V2_TEXT.clueUi.clock.replace('{min}', String(profile.minutes))}` : null, profile.minutes < 10);
+      }
+    }
     droneEyes.update(rdt, now / 1000);
 
     // ---------------------------------------------------------------- effects
@@ -1225,6 +1399,8 @@ async function boot(): Promise<void> {
     // Weather: the monsoon storm through the middle of the night, lightning and thunder with it.
     const weather = debugWeather ?? (state === 'title' ? 'clear' : missions.def ? WEATHER[missions.def.id] ?? 'clear' : 'clear');
     rain.level = weather === 'storm' ? 1 : weather === 'drizzle' ? 0.35 : 0;
+    // A fading-clue step turns the drizzle into a downpour as it runs.
+    if (missions.rainBoost > 0) rain.level = Math.max(rain.level, 0.35 + 0.65 * missions.rainBoost);
     lightning.enabled = weather === 'storm' && !cinema.playingShots;
     rain.update(rdt, camera.position);
     sound.setRain(rain.level, rdt);
@@ -1259,7 +1435,7 @@ async function boot(): Promise<void> {
     // Missions take E first; otherwise E gets in / out of Kalki.
     const f = focus();
     const interact = playing && input.pressed('interact');
-    missions.update(adt, playing, f, interact && mode === 'foot', mode === 'foot' ? kart.position : null);
+    missions.update(adt, playing, f, interact && mode === 'foot', mode === 'foot' ? kart.position : null, playing && mode === 'foot' && input.held('interact'));
     const busyTrial = !!missions.stepDef && (missions.stepDef.kind === 'drive' || missions.stepDef.kind === 'chase');
     extras.update(adt, playing, f, mode === 'kart', busyTrial);
     if (playing && mode === 'foot' && !missions.promptText) {

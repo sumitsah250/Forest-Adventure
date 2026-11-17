@@ -55,6 +55,58 @@ export const T = {
     ],
   },
 
+  /** Clue cards, the evidence board, the sunrise clock and the campus screens. */
+  clueUi: {
+    gold: 'Clue found',
+    silver: 'Asha found this',
+    boardTitle: 'Evidence board',
+    boardSub: 'Three people were on campus late. Every card you find is pinned here.',
+    boardOther: 'Unclear',
+    boardEmpty: 'No cards yet.',
+    boardClose: 'Back',
+    pin: 'Pin to board',
+    pinned: 'Pinned',
+    pinNothing: 'That line proves nothing on its own.',
+    pinLocked: 'The board opens later tonight.',
+    lookCloser: 'Look closer',
+    accuseTitle: 'Who did it?',
+    accuseSub: 'Pick a suspect, then put one card on each question.',
+    accusePick: 'Tap a suspect to begin.',
+    accuseGo: 'Accuse',
+    accuseWeak: 'That does not prove it. Try other cards.',
+    accuseWrong: 'MITRA: {name}? These cards say otherwise. That cost you 15 minutes.',
+    accuseRight: 'It all points one way.',
+    clock: '{min} min to spare',
+    screenIntruder: 'INTRUDER',
+    screenReopened: 'CASE REOPENED',
+    screenHero: 'HERO OF WRC',
+    doorCut: 'The drone cut through the door!',
+    doorCutting: 'Drone cutting the door: {s} s',
+  },
+
+  /** Mini-games (src/campus/minigames/). */
+  mini: {
+    bubble: {
+      holdOk: 'Level. The wall will sit true.',
+      holdFail: 'The bubble would not settle. Try again.',
+      holding: 'Hold it… {p}%',
+      find: 'Centre the bubble between the marks. {s} s',
+    },
+  },
+
+  /** Asha hands over a clue the player missed, at the end of its mission (it becomes a silver card). */
+  ashaFound: {
+    c3: 'Krishna Dai told me what he saw at 6:55. I pinned it.',
+    c4: 'I picked up a yellow lanyard strap by the Auditorium. Pinned.',
+    c5: 'There was a grey hoodie thread on the MSC Hostel fence. Pinned.',
+    c14: 'A red pen-drive cap was lying by the NESS steps. Pinned.',
+    c6: 'Raju bolted the moment I said "server room". That goes on the board.',
+    c7: 'I copied the library register: Raju was there 6:40 to 7:15.',
+    c8: 'That note in "Ethics of AI" is mine. I pinned it anyway.',
+    c11: 'Bahadur Dai\'s register says Sunil signed out at 6:30. His bike never left.',
+    c12: 'The console log: sbasnet, then my account, at 6:55. Pinned.',
+  } as Record<string, string>,
+
   /** Screens outside the missions: name entry, the fest demo leaderboard, the location card. */
   screens: {
     nameTitle: 'Who are you?',
@@ -171,6 +223,7 @@ export const T = {
     collectObj: 'Find the dropped clues before the rain takes them',
     lanyard: 'Torn yellow lanyard strap',
     thread: 'Grey hoodie thread',
+    cap: 'Red pen-drive cap',
     krishna2: [
       'A yellow strap? Students wear blue; only contractors get yellow.',
       'And half the campus owns that grey hoodie. Be careful who you blame.',
@@ -201,6 +254,10 @@ export const T = {
     sandLabel: 'Sandbags',
     gotoObj: 'Rush the sandbags to the WRC Parapet',
     gotoLabel: 'Landslide',
+    bubbleLabel: 'Level the wall',
+    bubbleObj: 'Level the sandbag wall',
+    bubbleTitle: 'Dumpy level',
+    bubbleClue: 'Centre the bubble and hold it there.',
     wallLabel: 'Retaining wall check',
     wallObj: 'Check the wall can hold',
     wallClue: 'Soil 18 kN/m³ × wall 2 m = ? kPa',
@@ -281,6 +338,11 @@ export const T = {
     lockLabel: 'Relay pattern lock',
     lockObj: 'Crack the relay\'s pattern lock',
     lockClue: 'Watch. Repeat.',
+    pullLabel: 'MITRA relay',
+    pullObj: 'Pull the relay out of its mast',
+    pullPrompt: 'Hold E to pull the relay',
+    c6Mitra: 'Order received 6:55 PM. Account: agurung.',
+    c6Mitra2: 'Terminal: EXAM-CONSOLE-01. I never checked whose hands typed it.',
     mitraEnd: [
       'Relay offline. I… remember an order.',
       'Time 6:55 PM, account agurung. Terminal EXAM-CONSOLE-01.',

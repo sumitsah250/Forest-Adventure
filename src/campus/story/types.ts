@@ -31,7 +31,7 @@ export type Where =
 
 export type ItemModel = 'book' | 'cube' | 'breaker' | 'usb' | 'toolbox' | 'gnss' | 'torch' | 'sandbag' | 'evidence' | 'module' | 'part' | 'panel' | 'relay';
 
-export type ClueId = 'c1' | 'c2' | 'c3' | 'c4' | 'c5' | 'c6' | 'c7' | 'c8' | 'c9' | 'c10' | 'c11' | 'c12' | 'c13';
+export type ClueId = 'c1' | 'c2' | 'c3' | 'c4' | 'c5' | 'c6' | 'c7' | 'c8' | 'c9' | 'c10' | 'c11' | 'c12' | 'c13' | 'c14';
 /** The spec's C1-C10, plus short scripted moments (M1_GATE: the gate slam at the end of mission 1). */
 export type CutsceneId = 'C1' | 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'C7' | 'C8' | 'C9' | 'C10' | 'M1_GATE';
 
@@ -40,16 +40,6 @@ export type CutsceneId = 'C1' | 'C2' | 'C3' | 'C4' | 'C5' | 'C6' | 'C7' | 'C8' |
  * phase builds it. A `stub` step with one of these is skipped by the runner with a log line.
  */
 export type TodoId =
-  | 'TODO_P5_CLUE_TRACKING' // clue cards (gold / silver); `clue` fields on steps are ignored until then
-  | 'TODO_P5_PUZZLE_TIMER' // M3: the 90 s countdown that keeps running during the breaker puzzle
-  | 'TODO_P5_PLAYER_FACE_SCREENS' // M3 end: every screen shows the player's face
-  | 'TODO_P5_RAIN_FADE' // M4: clues fade as the rain grows
-  | 'TODO_P5_EVIDENCE_BOARD_OPEN' // M4 end: the read-only evidence board
-  | 'TODO_P5_BUBBLE_LEVEL' // M5: bubble-level mini-game before the 36 kPa check
-  | 'TODO_P5_RAJU_RUNS' // M5 end: Raju runs off
-  | 'TODO_P5_COLLECT_DRONES' // M6: searchlight drones during a collect step
-  | 'TODO_P5_PULL_RELAY' // M7: pull the relay out
-  | 'TODO_P5_DRONES_FREEZE_BLUE' // M7 end: every drone freezes and turns blue
   | 'TODO_P6_EVIDENCE_BOARD_ACCUSE' // M9: the accusation on the board (a plain choice until then)
   | 'TODO_P6_MOTORBIKE' // M10: Sunil on his motorbike (the chase target is a drone until then)
   | 'TODO_P6_GATE_SHUT_BAHADUR' // M10: MITRA shuts the gate, Bahadur Dai catches Sunil
@@ -60,7 +50,7 @@ export interface ItemDef {
   label: string;
   model: ItemModel;
   at: Where;
-  /** Picking this up finds a clue. Ignored until TODO_P5_CLUE_TRACKING. */
+  /** Picking this up finds a clue (a gold card). Clue objects sparkle within 6 m. */
   clue?: ClueId;
 }
 
@@ -70,13 +60,26 @@ export type PuzzleDef =
   | { type: 'gauge'; title: string; clue: string; hits: number; speed: number }
   | { type: 'tuner'; title: string; clue: string }
   | { type: 'debug'; title: string; clue: string; lines: string[]; bug: number; why: string }
-  | { type: 'simon'; title: string; clue: string; length: number };
+  | { type: 'simon'; title: string; clue: string; length: number }
+  /** Centre a bubble and hold it there for `hold` seconds (the Bubble Level mini-game). */
+  | { type: 'bubble'; title: string; clue: string; hold: number };
 
 export type Step =
-  | { kind: 'talk'; npc: string; lines: string[]; at?: Where; obj?: string; clue?: ClueId }
-  | { kind: 'radio'; from: string; lines: string[]; clue?: ClueId }
+  /**
+   * clue: talking finds it (gold). lookCloser: a clue the player can find by tapping the person
+   * during the conversation (or pressing F); never mentioned by anyone.
+   */
+  | { kind: 'talk'; npc: string; lines: string[]; at?: Where; obj?: string; clue?: ClueId; lookCloser?: ClueId }
+  /**
+   * clue: hearing it finds it (gold). pin: line `line` goes into the radio log marked with a clue,
+   * found (gold) only if the player pins that line to the evidence board.
+   */
+  | { kind: 'radio'; from: string; lines: string[]; clue?: ClueId; pin?: { clue: ClueId; line: number } }
   | { kind: 'goto'; at: Where; label: string; obj: string; time?: number }
-  /** drones: TODO_P5_COLLECT_DRONES. fade: TODO_P5_RAIN_FADE. Both are ignored until built. */
+  /**
+   * drones: searchlight drones sweep around the items. fade: the items fade away over 90 s as the
+   * rain grows; a faded clue is missed (Asha gives it as silver at the end).
+   */
   | { kind: 'collect'; obj: string; verb: string; items: ItemDef[]; time?: number; drones?: number; fade?: 'rain' }
   | { kind: 'quiz'; npc: string; title: string; pool: Pool | 'final'; need: number; timer?: number; at?: Where; obj?: string }
   /**
@@ -84,8 +87,11 @@ export type Step =
    * after a while, the beacon after longer; solving it before the hints pays a bonus.
    */
   | { kind: 'riddle'; from: string; title: string; riddle: string; answer: Where; label: string; model: ItemModel; hints: [string, string]; time?: number }
-  /** time: TODO_P5_PUZZLE_TIMER (ignored until built). */
-  | { kind: 'puzzle'; at: Where; label: string; obj: string; model: ItemModel; puzzle: PuzzleDef; time?: number }
+  /**
+   * time: a countdown that keeps running while the puzzle is open (M3: a drone cutting through
+   * the door). At zero the player loses a heart and the step starts again.
+   */
+  | { kind: 'puzzle'; at: Where; label: string; obj: string; model: ItemModel; puzzle: PuzzleDef; time?: number; cutDoor?: Where }
   /** pursuer: a MITRA drone hunts Kalki; let it sit on you and you lose a heart. */
   | { kind: 'drive'; obj: string; route: Pt[]; time: number; pursuer?: boolean }
   | { kind: 'chase'; obj: string; route: Pt[]; time: number; speed: number }
@@ -96,6 +102,12 @@ export type Step =
   /** A document (register, log, note) shown as a card. */
   | { kind: 'read'; title: string; lines: string[]; clue?: ClueId }
   | { kind: 'cutscene'; id: CutsceneId }
+  /** The evidence board opens (read-only until mission 9). */
+  | { kind: 'board' }
+  /** A character runs to a place along a scripted path (and stays there). */
+  | { kind: 'run'; npc: string; to: Where; clue?: ClueId }
+  /** Hold E (or the use button) at a device for `seconds`. */
+  | { kind: 'hold'; at: Where; label: string; obj: string; model: ItemModel; seconds: number; prompt: string }
   | { kind: 'stub'; todo: TodoId; note: string; clue?: ClueId };
 
 export type Sky = 'dusk' | 'night' | 'predawn' | 'dawn';
@@ -120,6 +132,8 @@ export interface MissionDef {
 }
 
 export interface NpcDef {
+  /** Props worn over the outfit: a contractor's lanyard with a red pen drive, a hood. */
+  extras?: ('lanyard' | 'hood')[];
   id: string;
   name: string;
   role: string;

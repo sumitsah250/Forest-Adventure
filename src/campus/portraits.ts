@@ -6,13 +6,16 @@
 // dialogue card falls back to initials.
 
 import * as THREE from 'three';
-import { createHumanoid, type Outfit } from '../character/humanoid.ts';
+import { createHumanoid, type Humanoid, type Outfit } from '../character/humanoid.ts';
+import { dressExtras } from './props.ts';
 
-const SIZE = 192;
+const SIZE = 256;
 const OUT = 96;
 
 export class Portraits {
   private urls = new Map<string, string | null>();
+  /** Full-size (256 x 256) pictures kept for the campus screens. */
+  private full = new Map<string, HTMLCanvasElement>();
   private renderer: THREE.WebGLRenderer;
 
   constructor(renderer: THREE.WebGLRenderer) {
@@ -24,8 +27,16 @@ export class Portraits {
     return this.urls.get(id) ?? null;
   }
 
-  /** Renders portraits for a list of characters (a few milliseconds each). */
-  makeAll(list: { id: string; outfit: Outfit }[]): void {
+  /** The 256 x 256 picture of a character made with `keep: true`, or null. */
+  canvas(id: string): HTMLCanvasElement | null {
+    return this.full.get(id) ?? null;
+  }
+
+  /**
+   * Renders portraits for a list of characters (a few milliseconds each). A character is an
+   * outfit for the standard model, or `make` for another rig (the player's own model).
+   */
+  makeAll(list: { id: string; outfit?: Outfit; make?: () => Humanoid; keep?: boolean; extras?: ('lanyard' | 'hood')[] }[]): void {
     const r = this.renderer;
     const scene = new THREE.Scene();
     scene.add(new THREE.HemisphereLight('#ffffff', '#8a8f9a', 1.5));
@@ -51,10 +62,11 @@ export class Portraits {
     const prevAlpha = r.getClearAlpha();
     r.setClearColor(0x000000, 0);
     try {
-      for (const { id, outfit } of list) {
+      for (const { id, outfit, make, keep, extras } of list) {
         if (this.urls.has(id)) continue;
         try {
-          const rig = createHumanoid(outfit);
+          const rig = outfit ? createHumanoid(outfit) : make!();
+          if (extras) dressExtras(rig, extras);
           scene.add(rig.root);
           r.setRenderTarget(target);
           r.clear();
@@ -74,6 +86,12 @@ export class Portraits {
             }
           }
           bctx.putImageData(img, 0, 0);
+          if (keep) {
+            const copy = document.createElement('canvas');
+            copy.width = copy.height = SIZE;
+            copy.getContext('2d')!.drawImage(big, 0, 0);
+            this.full.set(id, copy);
+          }
           sctx.clearRect(0, 0, OUT, OUT);
           sctx.drawImage(big, 0, 0, OUT, OUT);
           this.urls.set(id, small.toDataURL('image/png'));

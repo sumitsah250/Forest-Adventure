@@ -258,6 +258,11 @@ export class Drone {
     this.pool.visible = searchlight;
   }
 
+  /** The eye's glow colour (MITRA red; blue once the relay is pulled). */
+  setEyeColor(c: string): void {
+    this.eye.emissive.set(c);
+  }
+
   /** The pool of light lives in world space (added to the same parent as the drone). */
   get light(): THREE.Mesh {
     return this.pool;
