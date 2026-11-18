@@ -907,3 +907,39 @@ body.is-touch .cq-speed { bottom: max(10px, env(safe-area-inset-bottom)); }
 @media (max-height: 340px) {
   body.is-touch .cq-mini { display: none; }
 }
+
+/* Any overlay taller than the screen scrolls (title, pause, mission lists on a landscape phone) instead of
+   being cut off with its buttons out of reach. */
+.cq-overlay { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* Short landscape screens (phones): the title screen becomes a lobby, the title on the left and the menu in
+   a column on the right, so Start / Continue is on screen without scrolling. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .cq-overlay--title { padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); }
+  .cq-overlay--title .cq-title {
+    width: min(920px, 100%); grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); column-gap: 28px; row-gap: 0;
+    align-items: start; justify-items: center;
+  }
+  .cq-overlay--title .cq-title > * { grid-column: 1; margin-bottom: 8px; }
+  .cq-overlay--title .cq-title > .cq-menu { grid-column: 2; grid-row: 1 / span 30; gap: 7px; width: 100%; }
+  .cq-overlay--title .cq-menu .cq-btn { padding-top: 9px; padding-bottom: 9px; }
+  .cq-overlay--title .cq-title__name { font-size: clamp(28px, 10vh, 46px); }
+  .cq-overlay--title .cq-title__sub { margin-top: -4px; font-size: 15px; }
+  .cq-overlay--title .cq-title__studio { font-size: 10px; }
+  .cq-overlay--title .cq-title__place { font-size: 13px; }
+  .cq-overlay--title .cq-title__blurb { display: none; }
+  .cq-overlay--title .cq-story-pick__opt { padding-top: 6px; padding-bottom: 6px; }
+  .cq-overlay--title .cq-title__credit { font-size: 9px; }
+}
+/* The "Who are you?" card on a landscape phone: name and roll side by side, so Start fits on screen. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .cq-name { width: min(640px, 100%); grid-template-columns: 1fr 1fr; column-gap: 14px; row-gap: 8px; padding: 16px 20px 14px; }
+  .cq-name > :not(.cq-name__field) { grid-column: 1 / -1; }
+  .cq-name h2 { font-size: 22px; }
+  .cq-name__sub { margin: -4px 0 0; font-size: 13px; }
+  .cq-name__err { min-height: 0; }
+  .cq-name .cq-btn { padding: 11px; }
+}
+/* Very short screens: the daily goals list makes way for the story picker (it is in Goals & badges too). */
+@media (orientation: landscape) and (max-height: 400px) {
+  .cq-overlay--title .cq-goals--mini { display: none; }
+}
