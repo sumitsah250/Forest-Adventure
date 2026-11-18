@@ -387,7 +387,10 @@ export const WEATHER: Record<string, 'clear' | 'drizzle' | 'storm'> = {
   workshop: 'drizzle', runaway: 'drizzle', source: 'drizzle', whodunit: 'drizzle', firewall: 'storm',
 };
 
-export const STORY_BLURB = 'The night before the tech fest, the campus AI locks every gate and seizes the exam server. Sixteen missions, one night, one go-kart called <b>Kalki</b> — find who did it before the paper leaks at 9 AM.';
+/** Name and tag line on the title screen's story picker. */
+export const STORY_NAME = 'Lockdown Night';
+export const STORY_TAG = 'The original · 16 missions';
+export const STORY_BLURB ='The night before the tech fest, the campus AI locks every gate and seizes the exam server. Sixteen missions, one night, one go-kart called <b>Kalki</b> — find who did it before the paper leaks at 9 AM.';
 
 /** Share of campus with its power back after `story` finished missions: a little more each mission. */
 export function powerLevel(story: number): number {

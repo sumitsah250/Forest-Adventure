@@ -8,7 +8,7 @@ import { installButton } from '../pwa.ts';
 import { isEnabled } from '../games.ts';
 import type { ModalHost } from './minigames.ts';
 import { paintPlan } from './paint.ts';
-import { STORY_BLURB } from './story.ts';
+import { DEMO_MODE, STORY_BLURB, STORY_CHOICES, STORY_PICK, STORY_VERSION, chooseStory } from './story.ts';
 import { openRadioLog, runDialogue, type DialogueDeps, type PinOptions, type RadioLogEntry } from './dialogue.ts';
 
 const TEST = new URLSearchParams(location.search).has('test');
@@ -841,12 +841,30 @@ export class CampusUI implements ModalHost {
     box.innerHTML = `
       <div class="cq-title__studio">Sumix Developers presents</div>
       <div class="cq-title__name">CAMPUS QUEST</div>
-      <div class="cq-title__sub">BLACKOUT AT WRC</div>
+      <div class="cq-title__sub">${esc((STORY_CHOICES.find((c) => c.v === STORY_VERSION)?.name ?? '').toUpperCase())}</div>
       <div class="cq-title__place">IOE Pashchimanchal Campus · Lamachaur, Pokhara</div>
       <p class="cq-title__blurb">${STORY_BLURB}</p>
       ${o.profileLine ? `<div class="cq-title__profile">${o.profileLine}</div>` : ''}
       ${o.daily ? `<div class="cq-daily">${o.daily}</div>` : ''}
       ${o.goals.length ? `<div class="cq-goals cq-goals--mini"><b>Today</b>${o.goals.map((g) => `<span class="${g.done ? 'done' : ''}">${g.done ? '✓' : `${g.progress}/${g.target}`} ${esc(g.text)}</span>`).join('')}</div>` : ''}`;
+    // Story picker: both stories are playable; picking the other one reloads into it.
+    if (!DEMO_MODE) {
+      const pick = el('div', 'cq-story-pick');
+      pick.setAttribute('role', 'radiogroup');
+      pick.setAttribute('aria-label', STORY_PICK);
+      pick.append(el('div', 'cq-story-pick__label', esc(STORY_PICK)));
+      const row = el('div', 'cq-story-pick__row');
+      for (const c of STORY_CHOICES) {
+        const on = c.v === STORY_VERSION;
+        const b = el('button', `cq-story-pick__opt${on ? ' on' : ''}`, `<b>${esc(c.name)}</b><small>${esc(c.tag)}</small>`);
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(on));
+        if (!on) b.onclick = () => chooseStory(c.v);
+        row.append(b);
+      }
+      pick.append(row);
+      box.append(pick);
+    }
     const menu = el('div', 'cq-menu');
     if (o.continueLabel) {
       const c = el('button', 'cq-btn cq-btn--primary', `Continue <small>${esc(o.continueLabel)}</small>`);

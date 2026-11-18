@@ -148,6 +148,20 @@ kbd {
 .cq-title__blurb { margin: 0; max-width: 520px; font-size: 16px; line-height: 1.5; color: rgba(255, 255, 255, 0.88); }
 .cq-title__credit { font-size: 11px; color: rgba(255, 255, 255, 0.55); }
 .cq-menu { display: grid; gap: 10px; width: min(300px, 100%); }
+/* Title screen story picker: two side-by-side cards, the playing one in gold. */
+.cq-story-pick { display: grid; gap: 6px; width: min(460px, 100%); }
+.cq-story-pick__label { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); }
+.cq-story-pick__row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cq-story-pick__opt {
+  display: grid; gap: 3px; min-height: 56px; padding: 9px 12px; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08); color: #fff; font: 600 15px var(--font); cursor: pointer; text-align: center;
+  transition: background 0.15s, transform 0.1s; text-shadow: none;
+}
+.cq-story-pick__opt small { font-size: 12px; font-weight: 500; opacity: 0.75; }
+.cq-story-pick__opt:hover { background: rgba(255, 255, 255, 0.16); }
+.cq-story-pick__opt:active { transform: translateY(1px); }
+.cq-story-pick__opt:focus-visible { outline: 2px solid var(--cq-gold); outline-offset: 2px; }
+.cq-story-pick__opt.on { background: var(--cq-gold); border-color: var(--cq-gold); color: var(--cq-ink); cursor: default; }
 .cq-controls { display: none; padding: 12px 16px; border-radius: 12px; background: var(--cq-glass); text-shadow: none; }
 .cq-controls.show { display: block; }
 .cq-controls table { border-collapse: collapse; font-size: 14px; }

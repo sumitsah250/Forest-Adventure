@@ -26,11 +26,44 @@ export const DEMO_MODE = query.get('demo') === '1';
 /** ?debug=1: the developer panel (debug.ts). */
 export const DEBUG_MODE = query.get('debug') === '1';
 
+/** The story picked on the title screen (remembered per browser). */
+const CHOICE_KEY = 'campus-story-choice';
+
 function pickVersion(): 1 | 2 {
   if (DEMO_MODE) return 2;
   const q = query.get('story');
-  return q === '1' ? 1 : q === '2' ? 2 : DEFAULT_STORY_VERSION;
+  if (q === '1' || q === '2') return q === '1' ? 1 : 2;
+  try {
+    const c = localStorage.getItem(CHOICE_KEY);
+    if (c === '1' || c === '2') return c === '1' ? 1 : 2;
+  } catch {
+    // Storage blocked: fall back to the default.
+  }
+  return DEFAULT_STORY_VERSION;
 }
+
+/**
+ * Switches story from the title screen: remembers the choice and reloads with it (each
+ * story's progress is parked and restored by profile.ts, so nothing is lost).
+ */
+export function chooseStory(v: 1 | 2): void {
+  try {
+    localStorage.setItem(CHOICE_KEY, String(v));
+  } catch {
+    // Storage blocked: the address bar still carries the choice for this visit.
+  }
+  const url = new URL(location.href);
+  url.searchParams.set('story', String(v));
+  location.assign(url.toString());
+}
+
+/** Both stories for the title screen's picker: name and a short tag line. */
+export const STORY_CHOICES: { v: 1 | 2; name: string; tag: string }[] = [
+  { v: 1, name: v1.STORY_NAME, tag: v1.STORY_TAG },
+  { v: 2, name: v2.T.title.name, tag: v2.T.title.tag },
+];
+/** Heading over the picker. */
+export const STORY_PICK = v2.T.title.pick;
 
 export const STORY_VERSION: 1 | 2 = pickVersion();
 /** Story 2's text (for screens and lines that only exist in story 2). */

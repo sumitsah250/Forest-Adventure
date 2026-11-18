@@ -10,6 +10,10 @@
 
 export const T = {
   title: {
+    // Story picker on the title screen (story 1's name and tag are in story/v1.ts).
+    pick: 'Choose your story',
+    name: 'Blackout at WRC',
+    tag: 'The new story · 10 missions',
     blurb: 'The night before the tech fest, the campus AI locks every gate and names <b>you</b> as the intruder. Ten missions, one night, one go-kart called <b>Kalki</b>. Find who really did it before the exam paper leaks at 6 AM.',
   },
 
