@@ -12,6 +12,7 @@ import { TerrainRenderer, makeCanopyTexture } from '../render/terrainMesh.ts';
 import { loadPbr, setMaxAnisotropy } from '../render/textures.ts';
 import { Player } from '../player/player.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
+import { setCharacterDetail } from '../character/humanoid.ts';
 import { buildFoliageAtlas } from '../render/foliageAtlas.ts';
 import { Vegetation } from '../world/vegetation.ts';
 import { windUniforms } from '../render/foliageMaterial.ts';
@@ -76,6 +77,7 @@ export class Game {
     const forced = qualityOverride();
     if (forced) this.settings.quality = forced;
     this.preset = PRESETS[this.settings.quality];
+    setCharacterDetail(this.settings.quality !== 'low');
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: this.preset.antialias,

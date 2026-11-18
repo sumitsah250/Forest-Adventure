@@ -13,7 +13,7 @@ import { QUESTIONS, shuffled, type Question } from './questions.ts';
 import type { CampusUI, NavTarget } from './ui.ts';
 import type { CampusWorld } from './world.ts';
 import { Beacon, CheckRing, Drone, animateItem, coinModel, itemModel } from './actors.ts';
-import { choose, decide, heartsLabel, runPuzzle } from './minigames.ts';
+import { choose, decide, heartsLabel, offerSkip, runPuzzle } from './minigames.ts';
 import { has, levelOf, saveProfile, starsFor, type Profile } from './profile.ts';
 import type { GoalEvent } from './meta.ts';
 import type { ClueBook } from './clues.ts';
@@ -226,6 +226,12 @@ export class Missions {
   rainBoost = 0;
   /** Free roam with somewhere to go (story 2's long wait after mission 9). */
   roamGoal: { obj: string; sub: string; target: NavTarget } | null = null;
+  /**
+   * Failures (hearts lost) per step of the current mission, kept across retries so a player
+   * stuck on one step gets help: more time, then a Skip button (decision 44).
+   */
+  private fails = new Map<number, number>();
+  private failsFor = -1;
   /** Drone Hack's scout drone: every drone of this mission shows on the map (decision 13). */
   private scout = false;
   private locationPending = false;
@@ -310,6 +316,10 @@ export class Missions {
     // Resuming part-way: coins already missed, so "every coin" cannot be judged fairly.
     if (step > 0) this.bonus = this.bonus.map((b) => (b.id === 'allCoins' ? { ...b, state: 'failed' as const } : b));
     this.c.ui.setBonus(this.bonus.length ? this.bonus : null);
+    if (this.failsFor !== index) {
+      this.fails.clear();
+      this.failsFor = index;
+    }
     this.scout = !!d && this.c.profile.scout === index;
     if (this.scout) this.c.ui.toast(V2_TEXT.interlude.scout, 'good');
     if (d) this.roamGoal = null;
@@ -491,6 +501,8 @@ export class Missions {
     this.saveCurrent();
     this.refreshHud();
     this.c.onStep?.(st);
+    // Back on a timed step after failing it: say there is more time now.
+    if (this.failsHere() > 0 && 'time' in st && st.time) this.c.ui.toast(V2_TEXT.easy.easier, 'good');
     if (this.locationPending && st.kind !== 'cutscene' && d.location) {
       this.locationPending = false;
       this.c.locationCard?.(d.clock, d.location);
@@ -590,7 +602,7 @@ export class Missions {
         if (st.at) this.placeNpc(st.npc, this.resolve(st.at, st.npc));
         break;
       case 'collect': {
-        this.timer = st.time ?? null;
+        this.timer = st.time ? this.eased(st.time) : null;
         const objs = await Promise.all(st.items.map((it) => itemModel(it.model)));
         if (epoch !== this.epoch) return;
         if (st.fade) {
@@ -614,7 +626,7 @@ export class Missions {
         break;
       }
       case 'goto':
-        this.timer = st.time ?? null;
+        this.timer = st.time ? this.eased(st.time) : null;
         break;
       case 'quiz':
         if (!st.npc && st.at) await this.spawnDevice(st.at, st.title, 'panel', epoch);
@@ -638,7 +650,7 @@ export class Missions {
         break;
       }
       case 'drive': {
-        this.timer = st.time;
+        this.timer = this.eased(st.time);
         const pts = resample(st.route, 30);
         pts.forEach((p, i) => {
           const q = pts[Math.min(pts.length - 1, i + 1)];
@@ -660,7 +672,7 @@ export class Missions {
         break;
       }
       case 'chase': {
-        this.timer = st.time;
+        this.timer = this.eased(st.time);
         // The target: a courier drone, or Sunil's motorbike (owned by main, so it outlives the step).
         let drone: Drone | null = null;
         if (!st.bike || !this.c.bike) {
@@ -692,7 +704,7 @@ export class Missions {
         obj.visible = false;
         this.stepGroup.add(obj);
         this.riddle = { obj, spot, t: 0, hint: 0, seen: false };
-        this.timer = st.time ?? null;
+        this.timer = st.time ? this.eased(st.time) : null;
         break;
       }
       case 'kart':
@@ -707,7 +719,7 @@ export class Missions {
         this.patrols.push({ drone, cx: it.spot.x, cz: it.spot.z, r: 5 + (i % 2) * 1.5, w: (i % 2 ? -1 : 1) * 0.45, phase: i * 2.1 });
       });
     }
-    if (st.kind === 'puzzle' && st.time) this.puzzleTimer = st.time;
+    if (st.kind === 'puzzle' && st.time) this.puzzleTimer = this.eased(st.time);
     if (st.kind === 'hold') this.holdT = 0;
     if (epoch === this.epoch) this.scatterCoins();
     this.resnapIn = 2;
@@ -788,7 +800,17 @@ export class Missions {
     await this.enterStep();
   }
 
+  private failsHere(): number {
+    return this.fails.get(this.step) ?? 0;
+  }
+
+  /** A timed step's time: 50% longer for each failure on this step, up to double. */
+  private eased(t: number): number {
+    return t * (1 + 0.5 * Math.min(2, this.failsHere()));
+  }
+
   private loseHeart(reason: string): boolean {
+    this.fails.set(this.step, this.failsHere() + 1);
     this.closeCall = false;
     this.hearts -= 1;
     this.heartsLost += 1;
@@ -810,7 +832,16 @@ export class Missions {
     this.busy = true;
     this.clearStep();
     const from = this.lastCheckpoint();
-    await this.c.ui.message('Mission failed', 'You ran out of hearts. Every mission can be retried — the puzzles and questions change each time.', from > 0 ? V2_TEXT.clueUi.retryPart : 'Retry mission', 'bad');
+    const retry = from > 0 ? V2_TEXT.clueUi.retryPart : 'Retry mission';
+    // Stuck on the same step again and again: offer to skip it and carry on (decision 44).
+    if (this.failsHere() >= 2) {
+      const e = V2_TEXT.easy;
+      const skip = (await decide(this.c.ui, { title: e.failTitle, question: e.stuck, options: [retry, e.skipPart] })) === 1;
+      this.busy = false;
+      await this.begin(this.index, skip ? this.step + 1 : from, this.replay);
+      return;
+    }
+    await this.c.ui.message('Mission failed', 'You ran out of hearts. Every mission can be retried — the puzzles and questions change each time.', retry, 'bad');
     this.busy = false;
     await this.begin(this.index, from, this.replay);
   }
@@ -890,6 +921,8 @@ export class Missions {
     }
     if (first) p.story = index + 1;
     if (p.scout === index) p.scout = null;
+    this.fails.clear();
+    this.failsFor = -1;
     this.scout = false;
     p.current = null;
     saveProfile(p);
@@ -1597,6 +1630,7 @@ export class Missions {
     this.busy = true;
     try {
       if (st.kind === 'puzzle') {
+        if (this.failsHere() >= 2) offerSkip(V2_TEXT.easy.skip);
         const ok = await runPuzzle(this.c.ui, st.puzzle, heartsLabel(this.hearts, MAX_HEARTS));
         if (ok && !this.timedOut) {
           const got = this.chain(30);

@@ -146,7 +146,7 @@ export function runDialogue(host: DialogueHost, deps: DialogueDeps, speaker: Spe
       for (; on < to; on += 1) {
         chars[on].className = 'on';
         // Voice blips while typing only (not when a tap shows the rest of the line at once).
-        if (typing && voiced && on % 3 === 0 && chars[on].textContent !== ' ') deps.sound('blip', pitch);
+        if (typing && voiced && on % 4 === 0 && chars[on].textContent !== ' ') deps.sound('blip', pitch);
       }
       if (full()) box.classList.remove('typing');
     };

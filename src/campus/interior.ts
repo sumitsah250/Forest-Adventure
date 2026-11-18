@@ -31,6 +31,11 @@ const CORRIDOR = 2.5;
 const DOOR_H = 2.2;
 const RISE = 0.18;
 const TREAD = 0.28;
+/** The glass area of world.ts facadeTexture() in one bay and storey (u across, v up; the canvas is flipped). */
+const WIN_U0 = 52 / 256;
+const WIN_U1 = 204 / 256;
+const WIN_V0 = 1 - 172 / 256;
+const WIN_V1 = 1 - 54 / 256;
 
 /** Room names per floor, given out west side first then east, along the building. */
 const FLOOR_ROOMS: string[][] = [
@@ -100,7 +105,7 @@ class Parts {
 
 export function buildEnterable(
   b: BuildingData, ground: CampusGround, physics: PhysicsWorld, group: THREE.Group,
-  B: { facade: GeoBuilder; plain: GeoBuilder; flat: GeoBuilder }, wall: THREE.Color,
+  B: { facade: GeoBuilder; see: GeoBuilder; plain: GeoBuilder; flat: GeoBuilder }, wall: THREE.Color,
 ): EnterableBuild | null {
   let pts = b.pts.slice();
   if (polyArea(pts) < 0) pts = pts.reverse();
@@ -299,33 +304,82 @@ export function buildEnterable(
     const n = new THREE.Vector3(nx, 0, nz);
     const inward = new THREE.Vector3(-nx, 0, -nz);
     const bays = Math.max(1, Math.round(len / 3.3));
-    // Pieces along the edge: [t0, t1, bottom] (the doorway leaves a gap up to doorH).
-    const pieces: [number, number, number][] = [];
+    // Pieces along the edge: [t0, t1, bottom, top?] (the doorway leaves a gap up to doorH; the
+    // strip over it to the first floor is its own piece, so the floors above get real windows).
+    const pieces: [number, number, number, number?][] = [];
     if (i === doorEdgeIndex) {
       const t0 = Math.max(0, door.t - doorW / 2 / len);
       const t1 = Math.min(1, door.t + doorW / 2 / len);
-      pieces.push([0, t0, F0], [t0, t1, F0 + doorH], [t1, 1, F0]);
+      pieces.push([0, t0, F0], [t0, t1, F0 + doorH, F0 + STOREY], [t1, 1, F0]);
+      if (levels > 1) pieces.push([t0, t1, F0 + STOREY]);
     } else pieces.push([0, 1, F0]);
-    for (const [t0, t1, bottom] of pieces) {
+    // Walls long enough for windows have real ones (open panes in the texture, glass behind);
+    // short returns and the strip above the doorway keep the painted window of the texture.
+    const glazed = len >= 1.5;
+    for (const [t0, t1, bottom, pieceTop] of pieces) {
       if (t1 - t0 < 1e-3) continue;
+      const hi = pieceTop ?? top;
+      // Glazed from a storey line up (the strip just over the doorway stays painted).
+      const W = glazed && Math.abs((bottom - F0) / STOREY - Math.round((bottom - F0) / STOREY)) < 1e-6 ? B.see : B.facade;
       const P0: Pt = [a[0] + dx * t0, a[1] + dz * t0];
       const P1: Pt = [a[0] + dx * t1, a[1] + dz * t1];
       const u0 = t0 * bays;
       const u1 = t1 * bays;
       const v0 = (bottom - F0) / STOREY;
-      const v1 = (top - F0) / STOREY;
+      const v1 = (hi - F0) / STOREY;
       // Outside face (windows texture), and the inside face of the same wall.
       const A0 = new THREE.Vector3(P0[0], bottom, P0[1]);
-      const A1 = new THREE.Vector3(P0[0], top, P0[1]);
-      const C1 = new THREE.Vector3(P1[0], top, P1[1]);
+      const A1 = new THREE.Vector3(P0[0], hi, P0[1]);
+      const C1 = new THREE.Vector3(P1[0], hi, P1[1]);
       const C0 = new THREE.Vector3(P1[0], bottom, P1[1]);
-      B.facade.quad(B.facade.vert(A0, n, u0, v0, 0.92, seed, wall), B.facade.vert(A1, n, u0, v1, 1, seed, wall), B.facade.vert(C1, n, u1, v1, 1, seed, wall), B.facade.vert(C0, n, u1, v0, 0.92, seed, wall));
+      W.quad(W.vert(A0, n, u0, v0, 0.92, seed, wall), W.vert(A1, n, u0, v1, 1, seed, wall), W.vert(C1, n, u1, v1, 1, seed, wall), W.vert(C0, n, u1, v0, 0.92, seed, wall));
       const off = (p: THREE.Vector3) => p.clone().addScaledVector(n, -EXT);
-      B.facade.quad(B.facade.vert(off(C0), inward, u1, v0, 0.9, 0, INSIDE), B.facade.vert(off(C1), inward, u1, v1, 1, 0, INSIDE), B.facade.vert(off(A1), inward, u0, v1, 1, 0, INSIDE), B.facade.vert(off(A0), inward, u0, v0, 0.9, 0, INSIDE));
+      W.quad(W.vert(off(C0), inward, u1, v0, 0.9, 0, INSIDE), W.vert(off(C1), inward, u1, v1, 1, 0, INSIDE), W.vert(off(A1), inward, u0, v1, 1, 0, INSIDE), W.vert(off(A0), inward, u0, v0, 0.9, 0, INSIDE));
+      if (W === B.see) {
+        // Each window opening (the texture's pane area, per bay and storey): glass a few cm in
+        // from the outside face, plastered reveals through the wall, and a stone sill that
+        // sticks out below. A window cut by the doorway loses its reveal on that side (the
+        // door frame covers it).
+        const ry2 = Math.atan2(-dz, dx);
+        const at = (t: number, out: number): [number, number] => [a[0] + dx * t + nx * out, a[1] + dz * t + nz * out];
+        for (let f = Math.round((bottom - F0) / STOREY); f < levels; f += 1) {
+          const ya = F0 + (f + WIN_V0) * STOREY;
+          const yb = F0 + (f + WIN_V1) * STOREY;
+          for (let k = 0; k < bays; k += 1) {
+            const wa = (k + WIN_U0) / bays;
+            const wb = (k + WIN_U1) / bays;
+            const ta = Math.max(wa, t0);
+            const tb = Math.min(wb, t1);
+            if ((tb - ta) * len < 0.12) continue;
+            const cutA = wa < t0;
+            const cutB = wb > t1;
+            const wl = (tb - ta) * len;
+            let [x, z] = at((ta + tb) / 2, -0.07);
+            parts.add('glass', wl, yb - ya, 0.012, x, (ya + yb) / 2, z, ry2);
+            // Head and sill run past the jambs, except on a side the doorway cuts.
+            const span = (e: number): [number, number] => {
+              const s0 = ta - (cutA ? 0 : e / len);
+              const s1 = tb + (cutB ? 0 : e / len);
+              return [(s0 + s1) / 2, (s1 - s0) * len];
+            };
+            let [tm, w] = span(0.05);
+            [x, z] = at(tm, -EXT / 2);
+            parts.add('reveal', w, 0.05, EXT - 0.02, x, yb + 0.025, z, ry2);
+            [tm, w] = span(0.08);
+            [x, z] = at(tm, (0.1 - EXT) / 2);
+            parts.add('sill', w, 0.06, EXT + 0.1, x, ya - 0.03, z, ry2);
+            for (const [t, cut, dir] of [[ta, cutA, -1], [tb, cutB, 1]] as [number, boolean, number][]) {
+              if (cut) continue;
+              [x, z] = at(t + (dir * 0.025) / len, -EXT / 2);
+              parts.add('reveal', 0.05, yb - ya, EXT - 0.02, x, (ya + yb) / 2, z, ry2);
+            }
+          }
+        }
+      }
       const segLen = len * (t1 - t0);
       const mx = (P0[0] + P1[0]) / 2 - nx * EXT / 2;
       const mz = (P0[1] + P1[1]) / 2 - nz * EXT / 2;
-      physics.tag(physics.addBox({ x: mx, y: (bottom + top) / 2, z: mz, hx: segLen / 2, hy: (top - bottom) / 2, hz: EXT / 2, rotY: Math.atan2(-dz, dx) }), 'rock');
+      physics.tag(physics.addBox({ x: mx, y: (bottom + hi) / 2, z: mz, hx: segLen / 2, hy: (hi - bottom) / 2, hz: EXT / 2, rotY: Math.atan2(-dz, dx) }), 'rock');
     }
     // Door reveal (wall thickness) around the opening.
     if (i === doorEdgeIndex) {
@@ -781,6 +835,10 @@ function materials(): Record<string, THREE.Material> {
     board: std('#f7f7f2', { roughness: 0.3 }),
     screen: std('#15181c', { roughness: 0.25, metalness: 0.2 }),
     light: new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff4dc', emissiveIntensity: 1.6 }),
+    // Clear window glass: a faint blue-grey tint and a sharp sky reflection, see-through both ways.
+    glass: new THREE.MeshStandardMaterial({ color: '#6c838b', roughness: 0.04, metalness: 0.2, transparent: true, opacity: 0.3, depthWrite: false }),
+    reveal: std('#e6dfcf', { roughness: 0.9 }),
+    sill: std('#a7a196', { roughness: 0.75 }),
     none: new THREE.MeshBasicMaterial({ visible: false }),
   };
 }

@@ -27,6 +27,11 @@ export interface BoardText {
   accuseWeak: string;
   accuseWrong: string;
   accuseRight: string;
+  /** Help after 2, 3 and 4 failed tries, and the button that solves it. */
+  accuseHint1?: string;
+  accuseHint2?: string;
+  accuseHint3?: string;
+  accuseSolve?: string;
 }
 
 export interface BoardOptions {
@@ -111,6 +116,10 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
     const slots: (string | null)[] = [null, null, null];
     const slotEls: HTMLButtonElement[] = [];
     const msg = el('div', 'cq-board__msg');
+    // Help after failed tries (decision 44): a pointer, then glowing cards, then "solve it for me".
+    const hintEl = el('div', 'cq-board__hint');
+    const solveBtn = el('button', 'cq-btn', t.accuseSolve ?? '');
+    let tries = 0;
     const go = el('button', 'cq-btn cq-btn--primary', t.accuseGo);
     if (accuse) {
       const qs = el('div', 'cq-board__qs');
@@ -128,7 +137,11 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
       go.onclick = () => check();
       // The questions stay in view at the bottom while the cards scroll (small screens).
       const foot = el('div', 'cq-board__foot');
-      foot.append(qs, msg, go);
+      const actions = el('div', 'cq-board__actions');
+      solveBtn.style.display = 'none';
+      solveBtn.onclick = () => solve();
+      actions.append(solveBtn, go);
+      foot.append(qs, msg, hintEl, actions);
       box.append(foot);
     } else {
       const close = el('button', 'cq-btn cq-btn--primary', t.boardClose);
@@ -211,14 +224,18 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
         o.onWrong?.(picked);
         picked = null;
         refresh();
+        hint();
         return;
       }
       const ok = (o.questions ?? []).every((q, i) => q.accepts.includes(slots[i] as ClueId));
       if (!ok) {
         msg.textContent = t.accuseWeak;
         o.sound('knock');
+        hint();
         return;
       }
+      hintEl.textContent = '';
+      solveBtn.style.display = 'none';
       // Right: red string from Sunil to the three cards, then his portrait goes cold (C7).
       msg.textContent = t.accuseRight;
       o.sound('chord');
@@ -228,6 +245,33 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
       drawString();
       window.setTimeout(() => portraitEls.get(o.culprit!)?.classList.add('cold'), 1600);
       window.setTimeout(done, 5200);
+    };
+    /** A card the player has that answers question i (the first accepted one found). */
+    const fits = (i: number) => (o.questions ?? [])[i]?.accepts.find((id) => o.state(id)) ?? null;
+    const hint = () => {
+      tries += 1;
+      if (tries >= 2 && t.accuseHint1) {
+        hintEl.textContent = t.accuseHint1;
+        portraitEls.get(o.culprit!)?.classList.add('hint');
+      }
+      if (tries >= 3 && t.accuseHint2) {
+        hintEl.textContent = t.accuseHint2;
+        (o.questions ?? []).forEach((_, i) => {
+          const id = fits(i);
+          if (id) cardEls.get(id)?.classList.add('hint');
+        });
+      }
+      if (tries >= 4 && t.accuseHint3) {
+        hintEl.textContent = t.accuseHint3;
+        solveBtn.style.display = '';
+      }
+    };
+    /** Picks the culprit and the fitting cards, then accuses (the last-resort button, and tests). */
+    const solve = () => {
+      picked = o.culprit ?? null;
+      (o.questions ?? []).forEach((_, i) => (slots[i] = fits(i)));
+      refresh();
+      check();
     };
     const drawString = () => {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -258,12 +302,7 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
     };
     // Browser tests (?test): accuse the culprit with the first accepted card for each question.
     if (TEST && accuse) {
-      (window as unknown as { __boardSolve?: () => void }).__boardSolve = () => {
-        picked = o.culprit ?? null;
-        (o.questions ?? []).forEach((q, i) => (slots[i] = q.accepts.find((id) => o.state(id)) ?? null));
-        refresh();
-        check();
-      };
+      (window as unknown as { __boardSolve?: () => void }).__boardSolve = solve;
     }
     host.keyHandler = (e) => {
       if (!accuse && (e.code === 'Escape' || e.code === 'KeyB')) done();

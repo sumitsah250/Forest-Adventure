@@ -108,86 +108,111 @@ export class CampusSound {
   private dripT = 0;
 
   /**
-   * Renders a slice of the two rain loops (called between frames until done, so building
-   * them never stalls a frame). Light rain: sparse distinct drops on leaves and paving over
-   * a soft hiss. Heavy: a dense wash of drops, a broadband roar and a low rumble.
+   * Renders one slice of the two rain loops (called between frames until done, so building them
+   * never stalls a frame). Rain is mostly a continuous wash: thousands of tiny drops a second
+   * that blur together, over a soft pink-noise hiss shaped like rain (little below 300 Hz, most
+   * energy between 1 and 6 kHz). Only a few drops stand out, and only a rare one rings in a
+   * puddle. Light: a gentle "shhh" with fine patter. Heavy: a dense roar with a low rumble.
+   * Stages: for each loop (light, heavy) and channel (left, right): the bed, then the drops in
+   * two halves, so no single slice does too much work.
    */
   private renderRainSlice(): boolean {
     const c = this.ctx;
     const sr = c.sampleRate;
     if (!this.rainJob) {
-      const len = Math.floor(sr * 5);
+      // 8 s per loop: long enough that the repeat is not noticeable.
+      const len = Math.floor(sr * 8);
       const mk = () => [new Float32Array(len), new Float32Array(len)];
       this.rainJob = { light: mk(), heavy: mk(), at: 0, len };
     }
     const j = this.rainJob;
-    const STAGES = 8;
+    const STAGES = 12;
     const stage = j.at++;
-    const [which, ch] = [stage < 4 ? 'light' : 'heavy', stage % 2] as const;
-    const part = (stage % 4) >> 1; // 0: bed, 1: drops
+    const which = stage < 6 ? 'light' : 'heavy';
+    const heavy = which === 'heavy';
+    const ch = Math.floor((stage % 6) / 3);
+    const part = stage % 3; // 0: bed, 1 and 2: drops
     const d = j[which][ch];
     const len = j.len;
     const r = rng(1000 + stage * 77);
     if (part === 0) {
-      // Bed: white noise, high-passed (rain has little low end up close) and softened on top,
-      // its loudness drifting slowly as gusts push the rain around.
-      const heavy = which === 'heavy';
+      // Bed: pink noise (Paul Kellet's filter), high-passed around 300 Hz and softened above
+      // ~7 kHz, its loudness drifting slowly as gusts push the rain around.
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
       let hp = 0;
       let prev = 0;
       let lp1 = 0;
       let lp2 = 0;
-      let lowr = 0;
+      let rumble = 0;
       let am = 1;
-      const kLp = heavy ? 0.55 : 0.4;
+      let amTo = 1;
+      const hpK = Math.exp((-2 * Math.PI * 300) / sr);
+      const lpK = 1 - Math.exp((-2 * Math.PI * (heavy ? 8000 : 6500)) / sr);
       for (let i = 0; i < len; i += 1) {
         const w = r() * 2 - 1;
-        hp = 0.985 * (hp + w - prev);
-        prev = w;
-        lp1 += (hp - lp1) * kLp;
-        lp2 += (lp1 - lp2) * kLp;
-        if (i % 512 === 0) am += ((0.75 + r() * 0.5) - am) * 0.08;
-        let v = lp2 * (heavy ? 0.16 : 0.05) * am;
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856;
+        b4 = 0.55 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.016898;
+        const pink = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
+        hp = hpK * (hp + pink - prev);
+        prev = pink;
+        lp1 += (hp - lp1) * lpK;
+        lp2 += (lp1 - lp2) * lpK;
+        // Gusts: a new target loudness every ~0.7 s, eased towards.
+        if (i % Math.floor(sr * 0.7) === 0) amTo = 0.75 + r() * 0.5;
+        am += (amTo - am) * 0.00004;
+        let v = lp2 * (heavy ? 0.55 : 0.37) * am;
         if (heavy) {
-          lowr += (w - lowr) * 0.012;
-          v += lowr * 0.5;
+          // The roar of a downpour on roofs and ground: a low, soft rumble.
+          rumble += (w - rumble) * 0.008;
+          v += rumble * 0.35 * am;
         }
         d[i] += v;
       }
     } else {
-      // Drops: mostly tiny, a few close and loud (heavy-tailed sizes). Two kinds: a short
-      // filtered tick (a drop on paving or a leaf) and a "plink", the bubble ring of a drop
-      // landing in a puddle (a damped tone that rises in pitch as the bubble collapses).
-      const heavy = which === 'heavy';
-      const count = Math.floor((heavy ? 2600 : 520) * (len / sr));
+      // Drops (half of them in each of the two drop stages). Sizes are heavy-tailed: almost all
+      // tiny, so they fuse into patter; a few close ones stand out. Most are a short filtered
+      // tick (a drop on a leaf, paving or a roof); a rare one is the soft ring of a drop landing
+      // in a puddle.
+      const count = Math.floor(((heavy ? 4200 : 1700) * (len / sr)) / 2);
       for (let k = 0; k < count; k += 1) {
         const t0 = Math.floor(r() * len);
-        const size = Math.pow(r(), heavy ? 5 : 3.2);
-        const amp = 0.012 + size * (heavy ? 0.22 : 0.35);
-        if (r() < (heavy ? 0.78 : 0.62)) {
-          const dur = Math.floor(sr * (0.002 + r() * 0.006));
-          const cut = 0.15 + r() * 0.6;
+        const size = Math.pow(r(), heavy ? 6 : 5);
+        const amp = 0.006 + size * (heavy ? 0.09 : 0.14);
+        if (r() < (heavy ? 0.985 : 0.96)) {
+          // Smaller drops are shorter and brighter; bigger ones a little duller and longer.
+          const dur = Math.floor(sr * (0.0008 + size * 0.004 + r() * 0.0015));
+          const cut = 0.25 + (1 - size) * 0.5 + r() * 0.2;
           let y = 0;
+          let y2 = 0;
           for (let i = 0; i < dur; i += 1) {
             y += ((r() * 2 - 1) - y) * cut;
-            d[(t0 + i) % len] += y * amp * Math.exp((-i / dur) * 5);
+            y2 += (y - y2) * cut;
+            d[(t0 + i) % len] += (y - y2 * 0.6) * amp * Math.exp((-i / dur) * 4);
           }
         } else {
-          const f0 = 1400 + r() * 3600;
-          const dur = Math.floor(sr * (0.008 + r() * 0.02));
-          const decay = 4 + r() * 3;
+          // A puddle "plip": a quiet damped tone with a slight upward glide.
+          const f0 = 900 + r() * 1800;
+          const dur = Math.floor(sr * (0.012 + r() * 0.02));
           let ph = 0;
           for (let i = 0; i < dur; i += 1) {
             const u = i / dur;
-            ph += (2 * Math.PI * f0 * (1 + 0.35 * u)) / sr;
-            d[(t0 + i) % len] += Math.sin(ph) * amp * 0.7 * Math.exp(-u * decay) * Math.min(1, i / 12);
+            ph += (2 * Math.PI * f0 * (1 + 0.15 * u)) / sr;
+            d[(t0 + i) % len] += Math.sin(ph) * amp * 0.35 * Math.exp(-u * 5) * Math.min(1, i / 24);
           }
         }
       }
-      // Seam: crossfade the loop ends (the bed is not periodic on its own).
-      const fade = Math.floor(sr * 0.04);
-      for (let i = 0; i < fade; i += 1) {
-        const t = i / fade;
-        d[i] = d[i] * t + d[len - fade + i] * (1 - t);
+      if (part === 2) {
+        // Seam: crossfade the loop ends (the bed is not periodic on its own).
+        const fade = Math.floor(sr * 0.08);
+        for (let i = 0; i < fade; i += 1) {
+          const t = i / fade;
+          d[i] = d[i] * t + d[len - fade + i] * (1 - t);
+        }
       }
     }
     if (j.at < STAGES) return false;
@@ -200,45 +225,49 @@ export class CampusSound {
     };
     const out = this.gain(1);
     const light = this.gain(0);
-    const heavy = this.gain(0);
+    const heavyGain = this.gain(0);
     this.loop(buf(j.light)).connect(light).connect(out);
-    this.loop(buf(j.heavy)).connect(heavy).connect(out);
+    this.loop(buf(j.heavy)).connect(heavyGain).connect(out);
     out.connect(this.a.buses.amb);
-    this.rain = { light, heavy, out };
+    this.rain = { light, heavy: heavyGain, out };
     this.rainJob = null;
     return true;
   }
 
-  /** A close drip or splash next to the listener (roof edges, leaves, puddles). */
+  /**
+   * A close drip next to the listener: water running off a roof edge or a leaf onto paving
+   * (a soft filtered tap), now and then a heavier drop into a puddle (a low "plop").
+   */
   private drip(level: number): void {
     const c = this.ctx;
     const t = c.currentTime + 0.01;
     const p = c.createStereoPanner();
-    p.pan.value = Math.random() * 2 - 1;
+    p.pan.value = Math.random() * 1.6 - 0.8;
     const g = this.gain(0);
     g.connect(p).connect(this.a.buses.amb);
-    const vol = (0.05 + Math.random() * 0.12) * (0.5 + level * 0.5);
-    if (Math.random() < 0.55) {
-      const o = c.createOscillator();
-      const f = 1600 + Math.random() * 2600;
-      o.frequency.setValueAtTime(f, t);
-      o.frequency.exponentialRampToValueAtTime(f * 1.45, t + 0.03);
-      o.connect(g);
+    const vol = (0.025 + Math.random() * 0.05) * (0.5 + level * 0.5);
+    if (Math.random() < 0.8) {
+      const s = c.createBufferSource();
+      s.buffer = this.noise();
+      const f = this.filter('bandpass', 1500 + Math.random() * 3000, 0.9);
+      s.connect(f).connect(g);
       g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.02 + Math.random() * 0.02);
+      s.start(t, Math.random() * 2, 0.05);
+    } else {
+      const o = c.createOscillator();
+      const f = 450 + Math.random() * 500;
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 1.12, t + 0.035);
+      const lp = this.filter('lowpass', 1600, 0.5);
+      o.connect(lp).connect(g);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol * 0.6, t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
       o.start(t);
       o.stop(t + 0.06);
-    } else {
-      const s = c.createBufferSource();
-      s.buffer = this.noise();
-      const f = this.filter('bandpass', 1800 + Math.random() * 3000, 1.2);
-      s.connect(f).connect(g);
-      g.gain.setValueAtTime(vol * 1.4, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-      s.start(t, Math.random() * 2, 0.04);
     }
   }
-
   /** Rain level 0..1 (0 off, 1 monsoon downpour). */
   setRain(level: number, dt: number): void {
     if (!this.a.running) return;
@@ -255,7 +284,7 @@ export class CampusSound {
     if (l > 0.05) {
       this.dripT -= dt;
       if (this.dripT <= 0) {
-        this.dripT = (0.08 + Math.random() * 0.5) / (0.4 + l);
+        this.dripT = (0.15 + Math.random() * 0.7) / (0.4 + l);
         this.drip(l);
       }
     }
@@ -571,7 +600,8 @@ export class CampusSound {
     // Crickets go quiet in heavy rain and come back as it eases.
     const cr = smooth(0.35, 0.8, night) * (1 - smooth(0.2, 0.7, rain)) * (active ? 1 : 0.3);
     a.crickets.gain.setTargetAtTime(cr * 0.035, t, 1.5);
-    a.town.gain.setTargetAtTime(0.05 + 0.03 * (1 - night), t, 2);
+    // Kept faint: louder, it reads as a car idling next to you rather than a far-off town.
+    a.town.gain.setTargetAtTime(0.012 + 0.01 * (1 - night), t, 2);
     for (const v of this.voices) {
       if (cr < 0.05) {
         v.next = Math.max(v.next, t);

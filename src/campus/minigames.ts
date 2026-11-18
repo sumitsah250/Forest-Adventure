@@ -43,6 +43,17 @@ const CONFIRM = ['KeyE', 'Enter', 'Space', 'NumpadEnter'];
  * Shared card frame: header, clue, body slot and a result panel. `finish(ok, text)` shows
  * the result, then Continue (E) resolves the promise.
  */
+/** A Skip button for the next puzzle card opened (null: none). Read and cleared by frame(). */
+let skipOffer: string | null = null;
+
+/**
+ * Offers a Skip button on the next puzzle or mini-game card (after repeated failures, and on
+ * every interlude). A skipped puzzle counts as passed; a skipped mini-game as not won.
+ */
+export function offerSkip(label: string | null): void {
+  skipOffer = label;
+}
+
 function frame(host: ModalHost, title: string, clue: string, hearts: string) {
   const ov = host.open('cq-overlay--quiz');
   const card = el('div', 'cq-quiz mg');
@@ -57,6 +68,20 @@ function frame(host: ModalHost, title: string, clue: string, hearts: string) {
   card.append(body, feedback, next);
   ov.append(card);
   let done = false;
+  let skipped = false;
+  const offer = skipOffer;
+  skipOffer = null;
+  if (offer) {
+    const skip = el('button', 'cq-btn mg-skip');
+    skip.textContent = offer;
+    skip.onclick = () => {
+      if (done) return;
+      skipped = true;
+      skip.remove();
+      finish(true, V2_TEXT.easy.skipped, V2_TEXT.easy.skippedHead);
+    };
+    card.append(skip);
+  }
   let resolveFn: (ok: boolean) => void = () => undefined;
   let result = false;
   const cleanups: (() => void)[] = [];
@@ -68,11 +93,11 @@ function frame(host: ModalHost, title: string, clue: string, hearts: string) {
     host.close();
     resolveFn(result);
   };
-  const finish = (ok: boolean, text: string) => {
+  const finish = (ok: boolean, text: string, head?: string) => {
     if (done) return;
     done = true;
     result = ok;
-    feedback.innerHTML = `<b>${ok ? 'Solved!' : 'Failed.'}</b> ${esc(text)}`;
+    feedback.innerHTML = `<b>${esc(head ?? (ok ? 'Solved!' : 'Failed.'))}</b> ${esc(text)}`;
     feedback.className = `cq-quiz__feedback show ${ok ? 'good' : 'bad'}`;
     next.style.display = '';
     host.onSound?.(ok ? 'clue' : 'knock');
@@ -102,7 +127,7 @@ function frame(host: ModalHost, title: string, clue: string, hearts: string) {
       fn(e);
     };
   };
-  return { card, body, finish, promise, keys, cleanups, isDone: () => done };
+  return { card, body, finish, promise, keys, cleanups, isDone: () => done, skipped: () => skipped };
 }
 
 export function heartsLabel(hearts: number, max: number): string {
@@ -117,7 +142,7 @@ export function runPuzzle(host: ModalHost, p: PuzzleDef, hearts: string): Promis
     case 'tuner': return tuner(host, p, hearts);
     case 'debug': return debug(host, p, hearts);
     case 'simon': return simon(host, p, hearts);
-    case 'bubble': return runMini(host, p.title, p.clue, hearts, bubbleLevel(p.hold, V2_TEXT.mini.bubble)).then((r) => r.ok);
+    case 'bubble': return runMini(host, p.title, p.clue, hearts, bubbleLevel(p.hold, V2_TEXT.mini.bubble)).then((r) => r.ok || !!r.skipped);
   }
 }
 
@@ -127,7 +152,7 @@ export function runPuzzle(host: ModalHost, p: PuzzleDef, hearts: string): Promis
  * Runs a mini-game (minigames/types.ts) inside the standard card: its own body, a frame loop,
  * held keys, and the shared result panel. Resolves with its result once Continue is pressed.
  */
-export function runMini(host: ModalHost, title: string, clue: string, hearts: string, game: MiniGame, opts: Record<string, unknown> = {}): Promise<{ ok: boolean; score?: number }> {
+export function runMini(host: ModalHost, title: string, clue: string, hearts: string, game: MiniGame, opts: Record<string, unknown> = {}): Promise<{ ok: boolean; score?: number; skipped?: boolean }> {
   const f = frame(host, title, clue, hearts);
   const held = new Set<string>();
   const down = (e: KeyboardEvent) => held.add(e.code);
@@ -164,7 +189,7 @@ export function runMini(host: ModalHost, title: string, clue: string, hearts: st
     ok = true;
     f.finish(true, '(test)');
   };
-  return f.promise.then((r) => ({ ok: r && ok, score }));
+  return f.promise.then((r) => ({ ok: r && ok && !f.skipped(), score, skipped: f.skipped() }));
 }
 
 // ------------------------------------------------------------------ switches

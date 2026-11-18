@@ -23,7 +23,7 @@ import { buildCampus } from './world.ts';
 import { crowd, populate, type Person } from './people.ts';
 import { GATE_ROAD } from './story/routes.ts';
 import { openShareCard } from './share.ts';
-import { decide, runMini, runPuzzle } from './minigames.ts';
+import { decide, offerSkip, runMini, runPuzzle } from './minigames.ts';
 import type { MiniGame } from './minigames/types.ts';
 import { signalTuner } from './minigames/tuner.ts';
 import { chiyaRush } from './minigames/chiya.ts';
@@ -32,7 +32,7 @@ import { bubbleLevel } from './minigames/bubble.ts';
 import { generatorPull } from './minigames/generator.ts';
 import { bugHunt } from './minigames/bughunt.ts';
 import { ShardRiddles } from './shardRiddles.ts';
-import { PLAYER_SUIT } from '../character/humanoid.ts';
+import { PLAYER_SUIT, setCharacterDetail } from '../character/humanoid.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
@@ -87,6 +87,7 @@ async function boot(): Promise<void> {
   const forced = qualityOverride();
   if (forced) settings.quality = forced;
   const preset = PRESETS[settings.quality];
+  setCharacterDetail(settings.quality !== 'low');
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: preset.antialias, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: params.has('test') });
   // Reading each shader's error log makes the browser wait for every compile in turn (seconds on phones).
@@ -1230,6 +1231,8 @@ async function boot(): Promise<void> {
     const daily = d.game === 'bughunt' && profile.bugDay !== today();
     if (d.game === 'bughunt') ui.toast(daily ? t.dailyNew.replace('{n}', String(d.reward.coins)) : t.dailyDone);
     let ok = true;
+    // Mini-games are optional: every one can be skipped (decision 44).
+    if (d.game !== 'garage') offerSkip(V2_TEXT.easy.skipMini);
     if (d.game === 'garage') await new Promise<void>((res) => openGarage(res));
     else if (d.game === 'hack') ok = await runPuzzle(ui, { type: 'simon', title: d.title, clue: d.clue, length: 5 }, '');
     else {
@@ -1778,6 +1781,8 @@ async function boot(): Promise<void> {
       });
     }
     const ph = kart.vehicle.phys;
+    // Messages, puzzles and cutscenes: the engine and the background noise step back.
+    audio.duck(!!ui.modal || cutscenes.playing);
     sound.updateKart({
       on: ph.engineOn && mode === 'kart', speed: ph.speed, throttle: state === 'play' ? Math.abs(ph.input.throttle) : 0,
       drift: kart.driftDir ? 1 : 0, airborne: kart.airborne, boosting: kart.boosting || kart.turbo > 0,

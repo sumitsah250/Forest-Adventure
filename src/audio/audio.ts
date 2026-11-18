@@ -51,7 +51,16 @@ export class AudioEngine implements SfxApi {
     const comp = c.createDynamicsCompressor();
     comp.threshold.value = -16;
     comp.ratio.value = 3;
-    this.master.connect(comp).connect(c.destination);
+    // A gentle master tone: no sub-rumble below 30 Hz, and a little less fizz above 7 kHz,
+    // so long sessions with headphones are easier on the ears.
+    const lowCut = c.createBiquadFilter();
+    lowCut.type = 'highpass';
+    lowCut.frequency.value = 30;
+    const air = c.createBiquadFilter();
+    air.type = 'highshelf';
+    air.frequency.value = 7000;
+    air.gain.value = -3;
+    this.master.connect(lowCut).connect(air).connect(comp).connect(c.destination);
     this.sfx = c.createGain();
     this.amb = c.createGain();
     this.veh = c.createGain();
@@ -110,6 +119,20 @@ export class AudioEngine implements SfxApi {
     if (this.started) return;
     this.started = true;
     this.startAmbience();
+  }
+
+  private ducked = false;
+
+  /**
+   * While a message, puzzle or cutscene is on screen: vehicles drop almost to silence and the
+   * ambience softens, so the words are easy to follow. Cheap to call every frame.
+   */
+  duck(on: boolean): void {
+    if (on === this.ducked) return;
+    this.ducked = on;
+    const t = this.ctx.currentTime;
+    this.veh.gain.setTargetAtTime(on ? 0.08 : 1, t, on ? 0.15 : 0.4);
+    this.amb.gain.setTargetAtTime(on ? 0.45 : 0.9, t, on ? 0.2 : 0.6);
   }
 
   suspend(on: boolean): void {
@@ -431,10 +454,19 @@ export class AudioEngine implements SfxApi {
     o.frequency.setValueAtTime(f0, t);
     o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const g = c.createGain();
+    // A slightly softer attack than a hard switch-on, so tones start without a click.
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.015, dur * 0.3));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(dest);
+    if (type === 'square' || type === 'sawtooth') {
+      // Raw square and saw waves buzz; rounding off their top harmonics makes them sound like
+      // real electronics and engines instead of a toy.
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = Math.min(4200, Math.max(f0, f1) * 3.5);
+      lp.Q.value = 0.5;
+      o.connect(lp).connect(g).connect(dest);
+    } else o.connect(g).connect(dest);
     o.start(t);
     o.stop(t + dur + 0.05);
   }
@@ -685,9 +717,12 @@ export class AudioEngine implements SfxApi {
     else out.connect(this.sfx);
     switch (name) {
       case 'clue': {
+        // A small bell: each note has a quiet inharmonic partial, like struck metal.
         out.connect(this.reverbSend);
-        this.tone(out, t, 659, 659, 0.9, 0.12);
-        this.tone(out, t + 0.16, 880, 880, 1.2, 0.1);
+        this.tone(out, t, 659, 659, 0.9, 0.1);
+        this.tone(out, t, 659 * 2.76, 659 * 2.76, 0.4, 0.015);
+        this.tone(out, t + 0.16, 880, 880, 1.2, 0.09);
+        this.tone(out, t + 0.16, 880 * 2.76, 880 * 2.76, 0.5, 0.012);
         break;
       }
       case 'objective':
@@ -719,17 +754,22 @@ export class AudioEngine implements SfxApi {
         this.tone(out, t, 180, 520, 0.5, 0.12, 'sawtooth');
         break;
       case 'driftCharge':
-        this.tone(out, t, 880, 1320, 0.18, 0.08, 'square');
+        this.tone(out, t, 880, 1320, 0.18, 0.06, 'triangle');
         break;
       case 'air':
         this.tone(out, t, 520, 780, 0.25, 0.1, 'triangle');
         break;
-      case 'blip':
-        // Dialogue "voice": a tiny pitched blip per few letters (gain carries the speaker's pitch).
-        this.tone(out, t, 420 + gain * 380, 400 + gain * 360, 0.045, 0.05, 'square');
+      case 'blip': {
+        // Dialogue "voice": a soft, rounded syllable every few letters, like a murmur behind the
+        // text rather than a beep (gain carries the speaker's pitch; the level is fixed and low).
+        out.gain.value = 1;
+        const f = (190 + gain * 170) * (0.94 + Math.random() * 0.12);
+        this.tone(out, t, f * 1.06, f, 0.07, 0.03, 'sine');
+        this.tone(out, t, f * 2.02, f * 1.98, 0.05, 0.008, 'sine');
         break;
+      }
       case 'glitch':
-        this.tone(out, t, 1800 + Math.random() * 1600, 300, 0.05, 0.035, 'sawtooth');
+        this.tone(out, t, 1800 + Math.random() * 1600, 300, 0.05, 0.022, 'sawtooth');
         break;
       case 'combo':
         this.tone(out, t, 1046, 1046, 0.18, 0.07, 'triangle');
@@ -781,7 +821,7 @@ export class AudioEngine implements SfxApi {
         out.connect(this.reverbSend);
         this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 520, dur: 0.6, vol: 1, attack: 0.004 });
         this.burst(out, t, { type: 'bandpass', freq: 1900, q: 3, dur: 0.18, vol: 0.6 });
-        this.tone(out, t, 210, 180, 0.9, 0.22, 'square');
+        this.tone(out, t, 210, 180, 0.9, 0.16, 'triangle');
         this.tone(out, t, 317, 300, 1.2, 0.12, 'triangle');
         for (let i = 1; i <= 3; i += 1) this.burst(out, t + i * 0.32, { buf: this.brown, type: 'lowpass', freq: 380, dur: 0.5, vol: 0.45 / i });
         break;
@@ -821,20 +861,25 @@ export class AudioEngine implements SfxApi {
         }
         break;
       case 'speakers':
-        // The campus PA waking up: a hum and a squeal of feedback.
+        // The campus PA waking up: the amplifier's mains hum and a faint ring of feedback.
         out.connect(this.reverbSend);
-        this.tone(out, t, 100, 100, 0.8, 0.08, 'square');
-        this.tone(out, t + 0.1, 2600, 3100, 0.35, 0.04, 'sine');
+        this.tone(out, t, 100, 100, 0.8, 0.05, 'sine');
+        this.tone(out, t, 200, 200, 0.7, 0.02, 'sine');
+        this.tone(out, t + 0.1, 2600, 2900, 0.35, 0.015, 'sine');
         break;
       case 'alarm':
-        // Spotted: a two-tone stinger.
-        this.tone(out, t, 880, 880, 0.14, 0.14, 'square');
-        this.tone(out, t + 0.16, 660, 660, 0.2, 0.14, 'square');
+        // Spotted: a two-tone siren stab. Urgent, but rounded so it does not pierce.
+        out.connect(this.reverbSend);
+        this.tone(out, t, 880, 880, 0.16, 0.08, 'triangle');
+        this.tone(out, t, 1760, 1760, 0.12, 0.015, 'sine');
+        this.tone(out, t + 0.17, 660, 660, 0.22, 0.08, 'triangle');
+        this.tone(out, t + 0.17, 1320, 1320, 0.18, 0.015, 'sine');
         break;
       case 'chirp':
-        // MITRA about to speak: two quick rising notes, like a terminal waking.
-        this.tone(out, t, 1320, 1760, 0.07, 0.07, 'square');
-        this.tone(out, t + 0.08, 1760, 2640, 0.09, 0.05, 'triangle');
+        // MITRA about to speak: three soft rising notes, like a terminal waking.
+        this.tone(out, t, 1046, 1046, 0.07, 0.035, 'sine');
+        this.tone(out, t + 0.07, 1318, 1318, 0.07, 0.035, 'sine');
+        this.tone(out, t + 0.14, 1568, 1568, 0.12, 0.03, 'sine');
         break;
       case 'badge':
         out.connect(this.reverbSend);
@@ -863,8 +908,10 @@ export class AudioEngine implements SfxApi {
         this.burst(out, t, { type: 'bandpass', freq: 2500, q: 3, dur: 0.03, vol: 0.5 });
         break;
       case 'switch':
-        this.tone(out, t, 180, 90, 0.12, 0.5, 'square');
-        this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 500, dur: 0.12, vol: 0.4 });
+        // A breaker or toggle: a sharp mechanical click with a little body.
+        this.burst(out, t, { type: 'bandpass', freq: 3200, q: 2.5, dur: 0.025, vol: 0.45 });
+        this.tone(out, t, 160, 90, 0.08, 0.25, 'sine');
+        this.burst(out, t, { buf: this.brown, type: 'lowpass', freq: 500, dur: 0.1, vol: 0.3 });
         break;
       case 'pour':
         this.burst(out, t, { buf: this.pink, type: 'bandpass', freq: 600, q: 0.8, attack: 0.15, dur: 2.0, vol: 0.4 });
@@ -904,13 +951,16 @@ export class AudioEngine implements SfxApi {
         }
         break;
       case 'radioBeep':
-        this.tone(out, t, 1250, 1250, 0.12, 0.08, 'square');
-        this.burst(out, t + 0.12, { type: 'bandpass', freq: 2000, dur: 0.25, vol: 0.12 });
+        // A handheld radio keying up: the squelch click, a short soft tone, a breath of static.
+        this.burst(out, t, { type: 'bandpass', freq: 2400, q: 2, dur: 0.02, vol: 0.25 });
+        this.tone(out, t + 0.02, 1175, 1175, 0.11, 0.035, 'sine');
+        this.tone(out, t + 0.02, 2350, 2350, 0.08, 0.008, 'sine');
+        this.burst(out, t + 0.12, { type: 'bandpass', freq: 1800, q: 0.7, dur: 0.2, vol: 0.05 });
         break;
       case 'generatorStart': {
         for (let i = 0; i < 3; i += 1) {
           this.burst(out, t + i * 0.55, { buf: this.pink, type: 'bandpass', freq: 1200, q: 1, dur: 0.25, vol: 0.4 });
-          this.tone(out, t + i * 0.55 + 0.2, 60, 35, 0.25, 0.5, 'square');
+          this.tone(out, t + i * 0.55 + 0.2, 60, 35, 0.25, 0.4, 'sawtooth');
         }
         break;
       }

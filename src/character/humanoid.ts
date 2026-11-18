@@ -8,7 +8,7 @@
 // axis is -Y and its +Z axis is the front of the limb. The animator relies on that.
 
 import * as THREE from 'three';
-import { HEAD_C, beardTexture, faceTexture, hairCardTexture, hairNormal, headSurface, sculpt, tuft, type HeadStyle } from './head.ts';
+import { HEAD_C, beardTexture, faceTexture, hairCardTexture, hairNormal, hairStrandTexture, headSurface, irisTexture, sculpt, tuft, type HeadStyle } from './head.ts';
 
 export const BONE_NAMES = [
   'root', 'hips', 'spine', 'chest', 'neck', 'head',
@@ -78,6 +78,8 @@ export interface Outfit {
   suit?: boolean;
   /** Female build: narrower shoulders and waist, softer jaw, no beard. */
   female?: boolean;
+  /** Knit tops: false for a plain sweater (default: a hoodie with its hood down). */
+  hood?: boolean;
   /** Default: 'swept' with a suit, otherwise 'short'. */
   hairStyle?: 'short' | 'swept' | 'textured' | 'long' | 'ponytail' | 'bun' | 'bald';
 }
@@ -170,19 +172,22 @@ function fabricNormal(kind: string): THREE.Texture {
   const key = `n-${kind}`;
   const hit = texCache.get(key);
   if (hit) return hit;
-  const S = 128;
+  // One tile covers about 20 cm of cloth: weave at a few millimetres (coarser reads as a
+  // waffle or a striped print).
+  const S = 256;
   const h = new Float32Array(S * S);
+  const TAU = Math.PI * 2;
   for (let y = 0; y < S; y += 1) {
     for (let x = 0; x < S; x += 1) {
       let v = 0;
-      if (kind === 'twill' || kind === 'denim') v = Math.sin(((x + y) / S) * Math.PI * 2 * 12) * 0.5 + 0.5;
-      else if (kind === 'knit') v = Math.abs(Math.sin((x / S) * Math.PI * 22)) * (0.6 + 0.4 * Math.sin((y / S) * Math.PI * 2 * 18));
-      else v = (Math.sin((x / S) * Math.PI * 2 * 20) + Math.sin((y / S) * Math.PI * 2 * 20)) * 0.25 + 0.5;
-      v += (hash(x, y, 7) - 0.5) * 0.35;
+      if (kind === 'twill' || kind === 'denim') v = Math.sin(((x + y) / S) * TAU * 40) * 0.5 + 0.5;
+      else if (kind === 'knit') v = Math.abs(Math.sin((x / S) * Math.PI * 48)) * (0.7 + 0.3 * Math.sin((y / S) * TAU * 48));
+      else v = (Math.sin((x / S) * TAU * 48) + Math.sin((y / S) * TAU * 48)) * 0.25 + 0.5;
+      v += (hash(x, y, 7) - 0.5) * 0.3;
       h[y * S + x] = v;
     }
   }
-  const t = heightToNormal(h, S, kind === 'knit' ? 1.6 : 0.9);
+  const t = heightToNormal(h, S, kind === 'knit' ? 1.1 : 0.7);
   texCache.set(key, t);
   return t;
 }
@@ -305,6 +310,8 @@ interface LoftOptions {
   tile?: number;
   /** Optional angular range (open surface), radians. */
   arc?: [number, number];
+  /** Face toward the ring centre instead of away from it (the inside of an open sheet). */
+  inward?: boolean;
 }
 
 const MATS = ['skin', 'top', 'trousers', 'boots', 'hair', 'headwear', 'leather', 'dark', 'gear', 'eyes', 'badge', 'shirt', 'face', 'sclera', 'hairCard', 'beard'] as const;
@@ -374,7 +381,7 @@ class SkinBuilder {
     const c0 = ringPts[1][0];
     const fn = new THREE.Vector3().crossVectors(b0.clone().sub(a0), c0.clone().sub(a0));
     const out = a0.clone().sub(new THREE.Vector3(...rings[0].c));
-    const flip = fn.dot(out) < 0;
+    const flip = (fn.dot(out) < 0) !== !!o.inward;
     for (let i = 0; i < rings.length - 1; i += 1) {
       for (let k = 0; k < n; k += 1) {
         const a = base + i * (n + 1) + k;
@@ -433,6 +440,24 @@ class SkinBuilder {
     const list = this.idx[mat];
     if (gi.index) for (let i = 0; i < gi.index.count; i += 1) list.push(base + gi.index.getX(i));
     else for (let i = 0; i < pos.count; i += 1) list.push(base + i);
+  }
+
+  /**
+   * Scales everything a bone carries about its joint, in proportion to its skin weight, as if
+   * the bone were scaled (so blended vertices stay smooth).
+   */
+  scaleBone(bone: BoneName, s: number): void {
+    const b = BI[bone];
+    const [jx, jy, jz] = JOINTS[bone];
+    for (let i = 0; i < this.pos.length / 3; i += 1) {
+      let w = 0;
+      for (let k = 0; k < 4; k += 1) if (this.si[i * 4 + k] === b) w += this.sw[i * 4 + k];
+      if (!w) continue;
+      const f = (s - 1) * w;
+      this.pos[i * 3] += (this.pos[i * 3] - jx) * f;
+      this.pos[i * 3 + 1] += (this.pos[i * 3 + 1] - jy) * f;
+      this.pos[i * 3 + 2] += (this.pos[i * 3 + 2] - jz) * f;
+    }
   }
 
   build(): THREE.BufferGeometry {
@@ -518,19 +543,44 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       }
     }
   }
-  sb.loft('top', torso.map(([y, a, b, z]) => ({ c: [0, y, z], a, b, w: torsoW(y), shade: y < 0.9 ? 0.8 : 1 })), { axis: 'y', radial: 24, p: 2.4, capStart: true, tile: 0.2 });
+  // Casual tops (sweaters, hoodies, shirts, jackets) hang loose over the waistband; uniforms
+  // and suits are tucked in under a belt or the jacket.
+  const untucked = !o.suit && !o.uniform;
+  if (untucked) {
+    const hem: [number, number, number, number][] = [
+      [0.9, 0.182, 0.131, -0.004],
+      [0.925, 0.183, 0.131, -0.006],
+      [0.98, 0.179, 0.126, -0.008],
+      [1.04, 0.168, 0.117, -0.006],
+    ];
+    const rings = [...hem, ...torso.filter(([y]) => y > 1.08)];
+    sb.loft('top', rings.map(([y, a, b, z]) => ({ c: [0, y, z], a, b, w: torsoW(y), shade: y < 0.93 ? 0.78 : y < 1.0 ? 0.9 : 1 })), { axis: 'y', radial: 24, p: 2.4, tile: 0.2 });
+  } else {
+    sb.loft('top', torso.map(([y, a, b, z]) => ({ c: [0, y, z], a, b, w: torsoW(y), shade: y < 0.9 ? 0.8 : 1 })), { axis: 'y', radial: 24, p: 2.4, capStart: true, tile: 0.2 });
+  }
   // Hood (hoodie) or collar.
   if (o.topPattern === 'knit') {
+    // Ribbed crew neckline standing just clear of the neck.
     sb.loft('top', [
-      { c: [0, 1.47, -0.07], a: 0.15, b: 0.07, w: [['chest', 1]] },
-      { c: [0, 1.53, -0.09], a: 0.13, b: 0.06, w: [['chest', 0.6], ['neck', 0.4]] },
-      { c: [0, 1.56, -0.1], a: 0.09, b: 0.035, w: [['neck', 1]] },
-    ], { axis: 'y', radial: 12, arc: [Math.PI * 0.95, Math.PI * 2.05], tile: 0.2 });
-  } else {
+      { c: [0, 1.5, -0.01], a: 0.088, b: 0.08, w: [['chest', 0.5], ['neck', 0.5]], shade: 0.85 },
+      { c: [0, 1.552, -0.005], a: 0.07, b: 0.073, w: [['neck', 1]], shade: 0.85 },
+    ], { axis: 'y', radial: 18, tile: 0.2 });
+  }
+  if (o.topPattern === 'knit' && o.hood !== false) {
+    // The hood lying bunched on the upper back behind the neck.
+    sb.loft('top', [
+      { c: [0, 1.4, -0.1], a: 0.1, b: 0.03, w: [['chest', 1]], shade: 0.8 },
+      { c: [0, 1.44, -0.112], a: 0.135, b: 0.048, w: [['chest', 1]], shade: 0.95 },
+      { c: [0, 1.49, -0.116], a: 0.14, b: 0.056, w: [['chest', 1]] },
+      { c: [0, 1.535, -0.106], a: 0.115, b: 0.05, w: [['chest', 0.6], ['neck', 0.4]] },
+      { c: [0, 1.565, -0.09], a: 0.07, b: 0.03, w: [['neck', 1]], shade: 0.85 },
+    ], { axis: 'y', radial: 18, p: 2.2, capStart: true, capEnd: true, tile: 0.2 });
+  }
+  if (o.topPattern !== 'knit') {
     sb.loft(o.suit ? 'shirt' : 'top', [
-      { c: [0, 1.5, -0.012], a: 0.085, b: 0.075, w: [['chest', 0.5], ['neck', 0.5]] },
-      { c: [0, 1.555, -0.014], a: 0.07, b: 0.068, w: [['neck', 1]] },
-    ], { axis: 'y', radial: 14, tile: 0.2 });
+      { c: [0, 1.5, -0.01], a: 0.087, b: 0.078, w: [['chest', 0.5], ['neck', 0.5]] },
+      { c: [0, 1.557, -0.005], a: 0.071, b: 0.073, w: [['neck', 1]] },
+    ], { axis: 'y', radial: 18, tile: 0.2 });
   }
   if (o.vest) {
     sb.loft('gear', torso.slice(2, 9).map(([y, a, b, z]) => ({ c: [0, y, z], a: a + 0.012, b: b + 0.012, w: torsoW(y) })), { axis: 'y', radial: 18, p: 2.6, tile: 0.2 });
@@ -586,7 +636,11 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     ];
     const footW = (z: number): Weights => (z < 0.06 ? [[foot, 1]] : z < 0.12 ? blend(z, 0.06, 0.12, foot, toe) : [[toe, 1]]);
     sb.loft('boots', footRings.map(([z, y, a, b]) => ({ c: [0.094 * side, y, z], a, b, w: footW(z) })), { axis: 'z', radial: 14, p: 2.6, capStart: true, capEnd: true, tile: 0.12 });
-    sb.box('dark', [0.094 * side, 0.008, 0.06], [0.104, 0.016, 0.29], foot, 0, 0.9);
+    // Sole following the shoe's outline, rising a little at the toe.
+    sb.loft('dark', footRings.map(([z, , a], i) => ({
+      c: [0.094 * side, 0.011 + Math.max(0, i - 4) * 0.004, z] as [number, number, number],
+      a: a + 0.004, b: i >= 5 ? 0.008 : 0.011, w: footW(z), shade: 0.9,
+    })), { axis: 'z', radial: 14, p: 4, capStart: true, capEnd: true, tile: 0.12 });
     // Arms: sleeves.
     const upper = `upperArm${L}` as BoneName;
     const fore = `foreArm${L}` as BoneName;
@@ -596,11 +650,12 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       // y, x, half-width (x), half-depth (z), z
       // Rounded shoulder: ring centres move outward as they drop, so the sleeve's outer
       // edge follows the curve of the deltoid instead of making a flat shelf.
-      [1.46, 0.184, 0.012, 0.02, -0.02],
-      [1.453, 0.189, 0.027, 0.036, -0.02],
-      [1.443, 0.193, 0.04, 0.048, -0.02],
-      [1.426, 0.197, 0.05, 0.055, -0.02],
-      [1.39, 0.203, 0.054, 0.056, -0.02],
+      // Kept close to the torso's shoulder line: a bigger cap reads as a puffed sleeve.
+      [1.456, 0.184, 0.012, 0.02, -0.02],
+      [1.449, 0.188, 0.026, 0.035, -0.02],
+      [1.439, 0.191, 0.037, 0.046, -0.02],
+      [1.422, 0.195, 0.046, 0.053, -0.02],
+      [1.39, 0.2, 0.051, 0.055, -0.02],
       [1.3, 0.205, 0.048, 0.05, -0.02],
       [1.21, 0.206, 0.044, 0.046, -0.02],
       [1.165, 0.206, 0.042, 0.043, -0.02],
@@ -679,12 +734,17 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     earPart(lobe, 0.95);
   }
   // Neck and head.
+  // The neck is full where it meets the shoulders (so the neckline stays sealed), then slims
+  // and leans a little forward up to the jaw.
+  const nk = o.female ? 0.86 : 1;
   sb.loft('skin', [
-    { c: [0, 1.48, -0.005], a: 0.062, b: 0.064, w: [['neck', 0.6], ['chest', 0.4]] },
-    { c: [0, 1.56, 0.0], a: o.female ? 0.055 : 0.064, b: o.female ? 0.058 : 0.066, w: [['neck', 1]] },
-    { c: [0, 1.6, 0.0], a: o.female ? 0.053 : 0.062, b: o.female ? 0.056 : 0.064, w: [['neck', 0.4], ['head', 0.6]] },
-    { c: [0, 1.625, -0.005], a: o.female ? 0.05 : 0.058, b: o.female ? 0.054 : 0.06, w: [['head', 1]] },
-  ], { axis: 'y', radial: 16, tile: 0.1 });
+    { c: [0, 1.48, -0.005], a: 0.064, b: 0.065, w: [['neck', 0.6], ['chest', 0.4]] },
+    { c: [0, 1.54, -0.002], a: 0.063 * (o.female ? 0.92 : 1), b: 0.064 * (o.female ? 0.94 : 1), w: [['neck', 1]] },
+    { c: [0, 1.57, 0.004], a: 0.057 * nk, b: 0.059 * nk, w: [['neck', 1]], shade: 0.9 },
+    // Under the jaw the neck sits in the head's shade.
+    { c: [0, 1.6, 0.006], a: 0.055 * nk, b: 0.058 * nk, w: [['neck', 0.4], ['head', 0.6]], shade: 0.72 },
+    { c: [0, 1.625, -0.002], a: 0.053 * nk, b: 0.056 * nk, w: [['head', 1]], shade: 0.62 },
+  ], { axis: 'y', radial: 18, tile: 0.1 });
   const style: HeadStyle = { female: !!o.female, seed: seedOf(o.id) };
   const hairStyle = o.hairStyle ?? (o.suit ? 'swept' : 'short');
   // Skin of the head: sculpted, with soft occlusion in the eye sockets, under the nose and jaw.
@@ -708,13 +768,19 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     const r = o.female ? 0.0118 : 0.0114;
     const cx = eyeP.x - side * 0.001;
     const cz = eyeP.z - r * 0.78;
-    sb.sphere('sclera', [cx, eyeP.y, cz], [r, r, r], 'head', 14, 0.88);
-    sb.sphere('eyes', [cx - side * 0.0008, eyeP.y - 0.0003, cz + r * 0.93], [r * 0.52, r * 0.52, r * 0.14], 'head', 12);
-    // Upper lid (covers the top of the eyeball) and a thin lower lid.
-    sb.sphere('face', [cx, eyeP.y + r * 0.62, cz + r * 0.08], [r * 1.12, r * 0.62, r * 1.08], 'head', 12, 0.93);
-    sb.sphere('face', [cx, eyeP.y - r * 0.86, cz + r * 0.05], [r * 1.06, r * 0.42, r * 1.02], 'head', 10, 0.97);
-    // Lash line along the lid edge.
-    sb.sphere('hair', [cx, eyeP.y + r * 0.2, cz + r * 0.62], [r * 1.0, r * 0.1, r * 0.55], 'head', 10, 0.6);
+    // One eyeball whose texture carries pupil, iris, limbus and sclera: its pole faces
+    // forward, turned in a touch so the eyes converge a few metres ahead.
+    const ball = new THREE.SphereGeometry(r, 24, 16);
+    ball.rotateX(Math.PI / 2);
+    ball.rotateY(-side * 0.06);
+    ball.translate(cx, eyeP.y, cz);
+    sb.addGeometry('eyes', ball, [['head', 1]]);
+    // Upper lid (its edge crosses the top of the iris, as in a relaxed open eye) and a thin
+    // lower lid along the bottom of the iris.
+    sb.sphere('face', [cx, eyeP.y + r * 0.98, cz + r * 0.06], [r * 1.12, r * 0.64, r * 1.08], 'head', 14, 0.93);
+    sb.sphere('face', [cx, eyeP.y - r * 0.92, cz + r * 0.05], [r * 1.06, r * 0.42, r * 1.02], 'head', 10, 0.97);
+    // Lash line along the upper lid edge.
+    sb.sphere('hair', [cx, eyeP.y + r * 0.38, cz + r * 0.6], [r * 1.04, r * 0.08, r * 0.52], 'head', 10, 0.6);
   }
   // Hair: a layer over the scalp whose thickness falls to zero (and just under the skin)
   // across a soft hairline, so edges never step along the mesh.
@@ -723,13 +789,16 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
     return t * t * (3 - 2 * t);
   };
+  /** Front hairline height (unit-sphere y) across the forehead; men's recedes at the temples. */
+  // High enough that the forehead is about a third of the face (lower reads as a bowl cut).
+  const frontLine = (xu: number) => (o.female ? 0.56 : 0.6) - 0.3 * Math.abs(xu) ** 1.6 + (o.female ? 0 : 0.07 * Math.exp(-((Math.abs(xu) - 0.45) ** 2) / 0.015));
   const hairCov = (xu: number, yu: number, zu: number) => {
     const s2 = sm(-0.3, 0.75, zu);
-    const front = (o.female ? 0.43 : 0.47) - 0.22 * Math.abs(xu) ** 1.6;
+    const front = frontLine(xu);
     const nape = hairStyle === 'long' ? -0.75 : hairStyle === 'textured' ? -0.52 : -0.45;
     const thr = nape + (front - nape) * s2;
     // Sides and back fade out gradually (a taper); the front hairline is crisper.
-    const fade = 0.1 + 0.22 * (1 - s2);
+    const fade = 0.13 + 0.2 * (1 - s2);
     let c = sm(thr - 0.03, thr + fade, yu);
     if (hairStyle === 'textured') {
       // Fringe: a few locks falling onto the forehead, mostly to the wearer's right.
@@ -742,6 +811,7 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     return c;
   };
   const textured = hairStyle === 'textured';
+  const combedBack = hairStyle === 'bun' || hairStyle === 'ponytail' || hairStyle === 'long';
   /** Thickness of the hair layer over the scalp (metres) where fully covered. */
   const hairDepth = (xu: number, yu: number, zu: number) => {
     if (covered) return 0.003;
@@ -757,6 +827,12 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       return (0.0025 + top * back + fringe + (clump * 0.5 + wave * 0.5) * 0.006 * sm(0.05, 0.6, yu)) * sides;
     }
     const crown = Math.max(0, yu) * (hairStyle === 'short' ? 0.007 : 0.01);
+    if (combedBack) {
+      // Pulled back to a bun, ponytail or down the back: close to the head at the temples
+      // and sides (a thick shell there reads as a mushroom), fuller only on top.
+      const sideThin = 1 - 0.55 * sm(0.5, 0.9, Math.abs(xu)) * sm(0.55, 0.0, yu);
+      return (0.0032 + crown * 0.8 + clump * 0.002) * sideThin + (hairStyle === 'long' ? 0.002 : 0);
+    }
     const sweep = hairStyle === 'swept' ? 0.014 * Math.max(0, zu - 0.2) * Math.max(0, yu - 0.25) * 3 : 0;
     return 0.0045 + crown + sweep + (o.female ? 0.004 : 0) + clump * 0.004;
   };
@@ -773,7 +849,7 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       shade: (xu, yu, zu) => (0.74 + tuft(xu * 2.3, yu * 2.3, zu * 2.3, 2) * 0.26) * (0.85 + 0.15 * hairCov(xu, yu, zu)),
     }), [['head', 1]]);
   }
-  if (!covered && hairStyle !== 'bald') {
+  if (!covered && hairStyle !== 'bald' && !combedBack) {
     // Hair cards: strips carrying a clump-of-strands texture, laid along the hair flow
     // (forward and to the wearer's right on top, a fringe falling onto the forehead, short
     // and downward at the sides and back). They lift a little in the middle for volume.
@@ -786,7 +862,7 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
     const down = new THREE.Vector3();
     const P = new THREE.Vector3();
     let placed = 0;
-    const target = textured ? 190 : 140;
+    const target = textured ? 190 : hairStyle === 'short' ? 80 : 120;
     for (let i = 0; i < 900 && placed < target; i += 1) {
       const yu = Math.min(0.97, -0.5 + Math.pow(rnd(), 0.75) * 1.5);
       const az = rnd() * Math.PI * 2;
@@ -797,24 +873,23 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       if (cov < 0.7) continue;
       const topZone = sm(0.2, 0.6, yu);
       if (topZone < 0.3 && rnd() > 0.5) continue; // fewer, shorter cards low on the sides and back
+      // No cards right on the front hairline: seen from the front they stand out as spikes.
+      if (!textured && zu > 0.4 && yu < frontLine(xu) + 0.14) continue;
       sculpt(xu, yu, zu, style, p0);
       nrm.set(xu / 0.073, yu / 0.115, zu / 0.096).normalize();
       p0.addScaledVector(nrm, hairInflate(xu, yu, zu) - 0.0012).add(HEAD_C);
-      const combedBack = hairStyle === 'bun' || hairStyle === 'ponytail' || hairStyle === 'long';
       const fringe = textured && zu > 0.5 && yu < 0.62 && xu > -0.6 && xu < 0.25;
       if (fringe) t.set(-0.9, -0.38, 0.25);
-      else if (combedBack) t.set(0, hairStyle === 'long' ? -0.4 : 0.1, -1);
       else if (hairStyle === 'swept') t.set(0.6, 0.1, -0.6);
       else if (zu > -0.2) t.set(textured ? -0.45 : -0.15, 0.05, 1);
       else t.set(Math.sign(xu) * 0.2, -0.25, -1);
       down.set(Math.sign(xu) * 0.12, -1, zu < 0 ? -0.35 : 0.15);
-      if (!fringe && !combedBack) t.lerp(down, 1 - topZone);
-      else if (combedBack) t.lerp(down, (1 - topZone) * 0.5);
+      if (!fringe) t.lerp(down, 1 - topZone);
       t.x += (rnd() - 0.5) * 0.7;
       t.z += (rnd() - 0.5) * 0.4;
       t.addScaledVector(nrm, -t.dot(nrm)).normalize();
       sv.crossVectors(nrm, t).normalize();
-      const reach = textured ? 0.04 : hairStyle === 'short' ? 0.018 : hairStyle === 'long' ? 0.06 : 0.03;
+      const reach = textured ? 0.04 : hairStyle === 'short' ? 0.018 : 0.03;
       const len = (fringe ? 0.045 : 0.022 + reach * topZone) * (0.75 + rnd() * 0.45);
       const w = (0.011 + 0.01 * topZone) * (0.8 + rnd() * 0.4);
       const lift = (0.0015 + (textured ? 0.0055 : 0.002) * topZone) * (0.5 + rnd() * 0.8) * (fringe ? 0.4 : 1);
@@ -844,21 +919,26 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
   }
   if (!covered && (hairStyle === 'long' || hairStyle === 'ponytail' || hairStyle === 'bun')) {
     if (hairStyle === 'long') {
-      // Hair falling behind the shoulders.
-      sb.loft('hair', [
+      // Hair falling behind the shoulders: an outer sheet and its inside a few millimetres in,
+      // so the sheet has thickness from every side (a single sheet seen edge-on is a hairline).
+      const sheet: Ring[] = [
         { c: [0, 1.7, -0.02], a: 0.083, b: 0.09, w: [['head', 1]] },
         { c: [0, 1.6, -0.045], a: 0.088, b: 0.075, w: [['head', 0.7], ['neck', 0.3]] },
         { c: [0, 1.52, -0.075], a: 0.1, b: 0.05, w: [['neck', 0.5], ['chest', 0.5]] },
         { c: [0, 1.42, -0.11], a: 0.105, b: 0.035, w: [['chest', 1]] },
         { c: [0, 1.36, -0.12], a: 0.085, b: 0.02, w: [['chest', 1]] },
-      ], { axis: 'y', radial: 18, arc: [Math.PI * 1.02, Math.PI * 1.98], capEnd: false, tile: 0.08 });
+      ];
+      const arc: [number, number] = [Math.PI * 1.02, Math.PI * 1.98];
+      sb.loft('hair', sheet, { axis: 'y', radial: 18, arc, capEnd: false, tile: 0.08 });
+      sb.loft('hair', sheet.map((r) => ({ ...r, a: r.a - 0.008, b: Math.max(0.006, r.b - 0.008), shade: 0.55 })), { axis: 'y', radial: 18, arc, inward: true, tile: 0.08 });
     } else if (hairStyle === 'ponytail') {
       sb.sphere('hair', [0, 1.745, -0.1], [0.022, 0.022, 0.02], 'head', 8, 0.7);
       sb.loft('hair', [
-        { c: [0, 1.74, -0.115], a: 0.02, b: 0.02, w: [['head', 1]] },
-        { c: [0, 1.68, -0.14], a: 0.026, b: 0.022, w: [['head', 1]] },
-        { c: [0, 1.6, -0.135], a: 0.022, b: 0.018, w: [['head', 0.5], ['neck', 0.5]] },
-        { c: [0, 1.53, -0.12], a: 0.01, b: 0.009, w: [['neck', 1]] },
+        { c: [0, 1.74, -0.115], a: 0.021, b: 0.02, w: [['head', 1]] },
+        { c: [0, 1.69, -0.142], a: 0.032, b: 0.026, w: [['head', 1]] },
+        { c: [0, 1.61, -0.142], a: 0.03, b: 0.024, w: [['head', 0.5], ['neck', 0.5]] },
+        { c: [0, 1.53, -0.128], a: 0.018, b: 0.015, w: [['neck', 1]] },
+        { c: [0, 1.48, -0.118], a: 0.006, b: 0.006, w: [['neck', 0.5], ['chest', 0.5]] },
       ], { axis: 'y', radial: 10, capEnd: true, tile: 0.06 });
     } else {
       sb.sphere('hair', [0, 1.75, -0.1], [0.045, 0.04, 0.038], 'head', 12, 0.85);
@@ -872,7 +952,9 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
       return t * t * (3 - 2 * t);
     };
-    const beardTop = (ax: number) => -0.21 + bsm(0.5, 0.93, ax) * 0.47;
+    // Upper edge: the moustache under the nose, dipping at the mouth corners, then the cheek
+    // line rising diagonally to the sideburns (higher up the cheek reads as a mask).
+    const beardTop = (ax: number) => -0.29 - 0.07 * bsm(0.2, 0.4, ax) + 0.42 * bsm(0.45, 1.0, ax);
     const beardCov = (xu: number, yu: number, zu: number) => {
       const ax = Math.abs(xu);
       let c = bsm(beardTop(ax) + 0.03, beardTop(ax) - 0.07, yu);
@@ -1029,7 +1111,7 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       sb.box('dark', [0.094 * side, 0.037, 0.138], [0.1, 0.068, 0.003], toe, 0, 0.5);
       for (const [z, y] of [[0.015, 0.107], [0.04, 0.101], [0.065, 0.094]] as const) sb.box('dark', [0.094 * side, y, z], [0.032, 0.004, 0.006], foot, 0, 0.6);
     }
-  } else {
+  } else if (!untucked) {
   // Belt with buckle.
   sb.loft('leather', [
     { c: [0, 0.955, -0.007], a: 0.174, b: 0.12, w: [['hips', 1]] },
@@ -1063,15 +1145,31 @@ function buildGeometry(o: Outfit): THREE.BufferGeometry {
       { c: [0, 1.31, -0.183], a: 0.12, b: 0.06, w: [['chest', 1]] },
       { c: [0, 1.39, -0.17], a: 0.1, b: 0.045, w: [['chest', 1]] },
     ], { axis: 'y', radial: 16, p: 3, capStart: true, capEnd: true, tile: 0.15 });
-    // Shoulder straps.
+    // Shoulder straps: over the top of each shoulder and down the chest just proud of the
+    // cloth, ending toward the armpit.
+    const frontAt = (x: number, y: number) => {
+      let r = torso[torso.length - 1];
+      for (let i = 0; i < torso.length - 1; i += 1) {
+        if (y >= torso[i][0] && y <= torso[i + 1][0]) {
+          const t = (y - torso[i][0]) / (torso[i + 1][0] - torso[i][0]);
+          r = torso[i].map((v, k) => v + (torso[i + 1][k] - v) * t) as [number, number, number, number];
+          break;
+        }
+      }
+      const u = Math.min(0.99, Math.abs(x) / r[1]);
+      return r[3] + r[2] * Math.pow(1 - Math.pow(u, 2.4), 1 / 2.4);
+    };
     for (const side of [1, -1]) {
+      const pts: [number, number][] = [[0.118, 1.44], [0.124, 1.37], [0.128, 1.29], [0.134, 1.22], [0.15, 1.16]];
       sb.loft('gear', [
-        { c: [0.11 * side, 1.08, 0.06], a: 0.022, b: 0.008, w: [['spine', 0.5], ['chest', 0.5]] },
-        { c: [0.12 * side, 1.3, 0.13], a: 0.024, b: 0.008, w: [['chest', 1]] },
-        { c: [0.115 * side, 1.47, 0.03], a: 0.024, b: 0.01, w: [['chest', 1]] },
-      ], { axis: 'y', radial: 6, p: 4, tile: 0.15 });
+        { c: [0.11 * side, 1.505, -0.02] as [number, number, number], a: 0.022, b: 0.03, w: [['chest', 1]] as Weights },
+        ...pts.map(([x, y]) => ({ c: [x * side, y, frontAt(x, y) + 0.007] as [number, number, number], a: 0.021, b: 0.006, w: [['chest', 1]] as Weights })),
+      ], { axis: 'y', radial: 8, p: 4, capEnd: true, tile: 0.15 });
     }
   }
+  // Adult proportions: the head (with hair, ears, eyes and headwear) a little larger
+  // against the shoulders; a small head on a long neck reads as a mannequin.
+  sb.scaleBone('head', o.female ? 1.05 : 1.065);
   return sb.build();
 }
 
@@ -1084,6 +1182,23 @@ interface BuiltOutfit {
 
 const outfitCache = new Map<string, BuiltOutfit>();
 
+/**
+ * High detail (the default): skin, hair and eyes use the physical material (sheen for the
+ * soft light on skin and hair, a clear coat for wet eyes). The low graphics preset turns it
+ * off before any character is built, for the cheaper standard shader.
+ */
+let physicalDetail = true;
+export function setCharacterDetail(high: boolean): void {
+  physicalDetail = high;
+}
+
+/** Physical material, or the standard one with the physical-only settings dropped. */
+function rich(p: THREE.MeshPhysicalMaterialParameters): THREE.MeshStandardMaterial {
+  if (physicalDetail) return new THREE.MeshPhysicalMaterial(p);
+  const { sheen: _s, sheenColor: _sc, sheenRoughness: _sr, clearcoat: _c, clearcoatRoughness: _cr, ior: _i, specularIntensity: _si, ...std } = p;
+  return new THREE.MeshStandardMaterial(std);
+}
+
 function cloth(color: string, pattern: string, roughness = 0.9): THREE.MeshStandardMaterial {
   const map = patternMap(pattern, color);
   return new THREE.MeshStandardMaterial({
@@ -1091,7 +1206,7 @@ function cloth(color: string, pattern: string, roughness = 0.9): THREE.MeshStand
     map,
     normalMap: fabricNormal(pattern === 'check' ? 'twill' : pattern),
     // Suiting cloth is finer and flatter than work wear.
-    normalScale: pattern === 'check' ? new THREE.Vector2(0.12, 0.12) : new THREE.Vector2(0.35, 0.35),
+    normalScale: pattern === 'check' ? new THREE.Vector2(0.12, 0.12) : pattern === 'knit' ? new THREE.Vector2(0.22, 0.22) : new THREE.Vector2(0.3, 0.3),
     roughness,
     metalness: 0,
     vertexColors: true,
@@ -1109,24 +1224,33 @@ function buildOutfit(o: Outfit): BuiltOutfit {
   const hit = outfitCache.get(o.id);
   if (hit) return hit;
   const geometry = buildGeometry(o);
-  const hairMat = new THREE.MeshStandardMaterial({
-    color: o.hair, roughness: 0.5, metalness: 0, vertexColors: true,
-    normalMap: hairNormal(), normalScale: new THREE.Vector2(0.4, 0.4),
+  // Very dark hair still shows brown in daylight; pure near-black renders as a plastic helmet.
+  const hairCol = new THREE.Color(o.hair).lerp(new THREE.Color('#4a3a2e'), 0.2);
+  const hairSheen = hairCol.clone().lerp(new THREE.Color('#c8b4a0'), 0.35);
+  const hairMat = rich({
+    // The strand map averages about 0.6 in linear light; the colour makes up for it.
+    color: hairCol.clone().multiplyScalar(1.6), map: hairStrandTexture(), roughness: 0.62, metalness: 0, vertexColors: true,
+    normalMap: hairNormal(), normalScale: new THREE.Vector2(0.5, 0.5),
+    sheen: 1, sheenColor: hairSheen, sheenRoughness: 0.45, specularIntensity: 0.6,
   });
+  // Skin: soft, slightly warm light at glancing angles (a cheap stand-in for light scattering
+  // under the skin) and the lower reflectance of skin, so faces don't look like painted plastic.
+  const skinLook = { roughness: 0.5, metalness: 0, vertexColors: true, ior: 1.4, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(o.skin).lerp(new THREE.Color('#ff6a4a'), 0.45).multiplyScalar(0.4) };
   const mats: Record<MatName, THREE.Material> = {
-    skin: new THREE.MeshStandardMaterial({ color: o.skin, roughness: 0.58, metalness: 0, vertexColors: true }),
-    face: new THREE.MeshStandardMaterial({
+    // Neck, ears and hands: matched to the painted face, which carries warmth and shading.
+    skin: rich({ color: new THREE.Color(o.skin).lerp(new THREE.Color('#a0503a'), 0.08).multiplyScalar(0.94), ...skinLook }),
+    face: rich({
       map: faceTexture({ skin: o.skin, hair: o.hair, female: !!o.female, beard: o.beard && !o.female, stubble: !o.female, seed: seedOf(o.id) }),
-      roughness: 0.55, metalness: 0, vertexColors: true,
+      ...skinLook,
     }),
     sclera: new THREE.MeshStandardMaterial({ color: '#e9e4dc', roughness: 0.25, metalness: 0 }),
     hairCard: new THREE.MeshStandardMaterial({
-      color: new THREE.Color(o.hair).multiplyScalar(1.35), map: hairCardTexture(), alphaTest: 0.38,
-      side: THREE.DoubleSide, roughness: 0.48, metalness: 0, vertexColors: true,
+      color: hairCol.clone().multiplyScalar(1.3), map: hairCardTexture(), alphaTest: 0.42,
+      side: THREE.DoubleSide, roughness: 0.6, metalness: 0, vertexColors: true,
     }),
     beard: new THREE.MeshStandardMaterial({
-      color: new THREE.Color(o.hair).multiplyScalar(1.3), map: beardTexture(), alphaTest: 0.32,
-      roughness: 0.6, metalness: 0, vertexColors: true,
+      color: hairCol.clone().multiplyScalar(1.25), map: beardTexture(), alphaTest: 0.32,
+      roughness: 0.7, metalness: 0, vertexColors: true,
     }),
     top: cloth(o.top, o.topPattern),
     trousers: cloth(o.trousers, o.trouserPattern),
@@ -1136,7 +1260,11 @@ function buildOutfit(o: Outfit): BuiltOutfit {
     leather: new THREE.MeshStandardMaterial({ color: '#2b2017', roughness: 0.55, metalness: 0, vertexColors: true }),
     dark: new THREE.MeshStandardMaterial({ color: '#1c1d1b', roughness: 0.7, metalness: 0.1, vertexColors: true }),
     gear: cloth(o.vest ?? o.backpack ?? '#555', 'canvas'),
-    eyes: new THREE.MeshStandardMaterial({ color: '#1d1611', roughness: 0.3, metalness: 0 }),
+    // Wet eye: a clear glossy coat over the iris and sclera gives the catch-light.
+    eyes: rich({
+      map: irisTexture(['#4a2c18', '#3a2414', '#563820', '#2e2018'][Math.floor(seedOf(o.id) * 4)]),
+      roughness: 0.25, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.04,
+    }),
     badge: new THREE.MeshStandardMaterial({ color: '#b39553', roughness: 0.35, metalness: 0.85 }),
     shirt: cloth('#eceae4', 'twill', 0.8),
   };

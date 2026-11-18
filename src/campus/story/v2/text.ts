@@ -77,6 +77,10 @@ export const T = {
     accuseWrong: 'MITRA: {name}? These cards say otherwise. That cost you 15 minutes.',
     accuseRight: 'It all points one way.',
     retryPart: 'Retry this part',
+    accuseHint1: 'Hint: the green cards clear Raju and Asha. Who signed out at 6:30 but never left?',
+    accuseHint2: 'Hint: the glowing cards answer the questions. Tap a glowing card, then tap a question.',
+    accuseHint3: 'Still stuck? Let the board fill itself in.',
+    accuseSolve: 'Solve it for me',
     clock: '{min} min to spare',
     screenIntruder: 'INTRUDER',
     screenReopened: 'CASE REOPENED',
@@ -127,6 +131,18 @@ export const T = {
       fail: 'Time is up. The bug was on line {n}.',
       wrong: 'Not that line. The bug was on line {n}.',
     },
+  },
+
+  /** Help for players who are stuck: skips and extra time (decision 44). */
+  easy: {
+    skip: 'Skip this puzzle',
+    skipMini: 'Skip',
+    skipped: 'On with the story.',
+    skippedHead: 'Skipped.',
+    easier: 'Take your time: you get longer on this try.',
+    failTitle: 'Mission failed',
+    stuck: 'This part keeps tripping you up. Try it again, or skip it and carry on with the story.',
+    skipPart: 'Skip this part',
   },
 
   /** Mini-games between missions (interludes.ts). */

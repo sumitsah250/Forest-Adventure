@@ -153,6 +153,8 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const [concrete, tin] = await Promise.all([loadPbr('concrete_floor_worn_001'), loadPbr('corrugated_iron_02')]);
   const mats = {
     facade: new THREE.MeshStandardMaterial({ map: facadeTexture(), vertexColors: true, roughness: 0.82 }),
+    // Walk-in buildings: the same wall with open window panes (glass and reveals are in interior.ts).
+    see: new THREE.MeshStandardMaterial({ map: facadeTexture(true), vertexColors: true, roughness: 0.82, alphaTest: 0.5 }),
     shop: new THREE.MeshStandardMaterial({ map: shopTexture(), vertexColors: true, roughness: 0.85 }),
     plain: new THREE.MeshStandardMaterial({ map: plasterTexture(), vertexColors: true, roughness: 0.9, side: THREE.DoubleSide }),
     flat: new THREE.MeshStandardMaterial({ map: concrete.map, normalMap: concrete.normalMap, roughnessMap: concrete.roughnessMap, vertexColors: true, side: THREE.DoubleSide }),
@@ -161,7 +163,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   // Window rectangles of facadeTexture() and shopTexture() in UV (the canvas is flipped).
   windowGlow(mats.facade, [52 / 256, 1 - 172 / 256, 204 / 256, 1 - 54 / 256], LIGHTS.uPower);
   windowGlow(mats.shop, [70 / 256, 1 - 170 / 256, 186 / 256, 1 - 70 / 256], TOWN_POWER);
-  const B = { facade: new GeoBuilder(), shop: new GeoBuilder(), plain: new GeoBuilder(), flat: new GeoBuilder(), tin: new GeoBuilder() };
+  const B = { facade: new GeoBuilder(), see: new GeoBuilder(), shop: new GeoBuilder(), plain: new GeoBuilder(), flat: new GeoBuilder(), tin: new GeoBuilder() };
   const kit = new Kit();
   const rng = mulberry32(2044);
   const footprints: { b: BuildingData; floor: number; top: number }[] = [];
@@ -217,7 +219,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   for (const l of DATA.lines) {
     if (l.kind === 'wall') linearBarrier(kit, ground, physics, l.pts, 'wall', [], panels);
     if (l.kind === 'fence') linearBarrier(kit, ground, physics, l.pts, 'fence', FENCE_GATES, panels);
-    if (l.kind === 'steps') stairs(kit, ground, l.pts, l.w);
+    if (l.kind === 'steps' && !claimedSteps.has(l)) stairs(kit, ground, l.pts, l.w);
   }
   standTiers(kit, ground, physics);
 
@@ -508,8 +510,12 @@ function detailTexture(): THREE.Texture {
 
 // ==================================================================== building textures
 
-function facadeTexture(): THREE.Texture {
-  // One storey, one bay: plastered wall, a framed window with a sill, and a floor band.
+/**
+ * One storey, one bay: plastered wall, a framed window with a sill, and a floor band. With
+ * `see`, the four glass panes are cut out (alpha 0) and the grille is redrawn as solid bars,
+ * for walk-in buildings that have real glass and a lit interior behind the opening.
+ */
+function facadeTexture(see = false): THREE.Texture {
   const s = 256;
   const c = document.createElement('canvas');
   c.width = c.height = s;
@@ -550,6 +556,15 @@ function facadeTexture(): THREE.Texture {
   ctx.fillStyle = 'rgba(255,255,255,0.25)';
   ctx.fillRect(wx - 12, wy - 24, ww + 24, 4);
   stain(ctx, s);
+  if (see) {
+    const tr = Math.round(wh * 0.32);
+    for (const [x0, x1] of [[wx, wx + ww / 2 - 4], [wx + ww / 2 + 4, wx + ww]]) {
+      ctx.clearRect(x0, wy, x1 - x0, tr);
+      ctx.clearRect(x0, wy + tr + 6, x1 - x0, wh - tr - 6);
+    }
+    ctx.fillStyle = '#2b261f';
+    for (let x = wx + 19; x < wx + ww - 6; x += 19) if (Math.abs(x - (wx + ww / 2)) > 8) ctx.fillRect(x - 1.5, wy, 3, wh);
+  }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
@@ -981,8 +996,173 @@ function addDoor(group: THREE.Group, e: Entrance, label: string, floor: number, 
     frame.rotation.y = yaw;
     group.add(frame);
   }
-  // Entrance: a landing at floor level, then equal steps (at most 16 cm) down to
-  // wherever the ground actually is at their foot (a platform, a path, a stairway).
+  if (!(open && grandStairs(group, e, floor, physics, ground))) doorSteps(group, e, floor, physics, ground);
+  if (!label) return;
+  const tex = signTexture(
+    [
+      { text: 'IOE · PASHCHIMANCHAL CAMPUS', size: 30, weight: 600, color: '#f2d27a', gap: 8 },
+      { text: label.toUpperCase(), size: label.length > 34 ? 38 : 50, weight: 700, color: '#ffffff' },
+    ],
+    { w: 1024, h: 200, bg: '#1d3f78', border: '#f2d27a' },
+  );
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 0.86), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
+  sign.position.set(e.doorX + fx * 0.08, floor + 2.95, e.doorZ + fz * 0.08);
+  sign.rotation.y = yaw;
+  group.add(sign);
+}
+
+/** Mapped stairways that a walk-in entrance staircase has taken over (not drawn again on their own). */
+const claimedSteps = new Set<object>();
+
+/**
+ * A walk-in building whose door has mapped stairways running out from it (the RIC has two side
+ * by side): one wide staircase in their place. A stone porch at floor level, equal steps
+ * (at most 16 cm) with dark nosings down to the ground at the stairways' far end, plastered
+ * cheek walls with a stone coping, and a steel handrail on each side. Returns false when no
+ * mapped stairway meets the door.
+ */
+function grandStairs(group: THREE.Group, e: Entrance, floor: number, physics: PhysicsWorld, ground: CampusGround): boolean {
+  const fx = Math.sin(e.facing);
+  const fz = Math.cos(e.facing);
+  // Lateral axis (forward × up), so (forward, up, lateral) is a right-handed frame.
+  const lx = -fz;
+  const lz = fx;
+  const along = (p: Pt) => (p[0] - e.doorX) * fx + (p[1] - e.doorZ) * fz;
+  const side = (p: Pt) => (p[0] - e.doorX) * lx + (p[1] - e.doorZ) * lz;
+  const found: { l: object; off: number; w: number; run: number }[] = [];
+  for (const l of DATA.lines) {
+    if (l.kind !== 'steps' || l.pts.length < 2) continue;
+    const a = l.pts[0];
+    const b = l.pts[l.pts.length - 1];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const [near, far] = along(a) < along(b) ? [a, b] : [b, a];
+    if (len < 1 || Math.abs(along(far) - along(near)) / len < 0.85) continue;
+    if (along(near) < -0.6 || along(near) > 2 || Math.abs(side(near)) > 4.5 || along(far) > 9) continue;
+    found.push({ l, off: (side(near) + side(far)) / 2, w: l.w ?? 2.4, run: along(far) });
+  }
+  if (!found.length) return false;
+  const lat0 = Math.min(-1.7, ...found.map((f) => f.off - f.w / 2));
+  const lat1 = Math.max(1.7, ...found.map((f) => f.off + f.w / 2));
+  const W = lat1 - lat0;
+  const lc = (lat0 + lat1) / 2;
+  const run = Math.max(...found.map((f) => f.run));
+  const P = (d: number, s: number): [number, number] => [e.doorX + fx * d + lx * s, e.doorZ + fz * d + lz * s];
+  const footG = ground.heightAt(...P(run + 0.25, lc));
+  const drop = floor - footG;
+  if (drop < 0.3) return false;
+  for (const f of found) claimedSteps.add(f.l);
+  const n = Math.max(2, Math.ceil(drop / 0.16));
+  const rise = drop / n;
+  const tread = Math.min(0.42, Math.max(0.3, (run - 1.6) / (n - 1)));
+  const porch = Math.max(1.6, run - (n - 1) * tread);
+  const dFoot = porch + (n - 1) * tread;
+  let gMin = Infinity;
+  for (let i = 0; i <= 4; i += 1) for (let j = 0; j <= 4; j += 1) gMin = Math.min(gMin, ground.heightAt(...P((dFoot * i) / 4, lat0 - 0.3 + ((W + 0.6) * j) / 4)));
+  const bottom = Math.min(gMin, footG) - 0.4;
+
+  const geos = new Map<string, THREE.BufferGeometry[]>();
+  const put = (mat: string, g: THREE.BufferGeometry) => {
+    const list = geos.get(mat) ?? [];
+    list.push(g.index ? g.toNonIndexed() : g);
+    geos.set(mat, list);
+  };
+  /** A box centred `d` out from the door and `s` across, `len` long (outwards) and `wid` wide, tilted down by `pitch`. */
+  const box = (mat: string, d: number, s: number, y: number, len: number, wid: number, h: number, pitch = 0, solid = false) => {
+    const g = new THREE.BoxGeometry(wid, h, len);
+    if (pitch) g.rotateX(pitch);
+    g.rotateY(e.facing);
+    const [x, z] = P(d, s);
+    g.translate(x, y, z);
+    put(mat, g);
+    if (solid) physics.addBox({ x, y, z, hx: wid / 2, hy: h / 2, hz: len / 2, rotY: e.facing });
+  };
+  const rod = (d: number, s: number, y: number, len: number, pitch: number, upright: boolean) => {
+    const g = new THREE.CylinderGeometry(upright ? 0.022 : 0.026, upright ? 0.022 : 0.026, len, 10);
+    if (!upright) g.rotateX(Math.PI / 2 + pitch);
+    g.rotateY(e.facing);
+    const [x, z] = P(d, s);
+    g.translate(x, y, z);
+    put('rail', g);
+  };
+
+  // Porch and steps (walkable boxes), each with a dark anti-slip nosing at its front edge.
+  box('stone', porch / 2, lc, (floor + bottom) / 2, porch, W, floor - bottom, 0, true);
+  box('nosing', porch - 0.045, lc, floor + 0.006, 0.07, W, 0.014);
+  for (let k = 1; k < n; k += 1) {
+    const top = floor - k * rise;
+    const d0 = porch + (k - 1) * tread;
+    box('stone', d0 + tread / 2, lc, (top + bottom) / 2, tread + 0.004, W, top - bottom, 0, true);
+    box('nosing', d0 + tread - 0.045, lc, top + 0.006, 0.07, W, 0.014);
+  }
+
+  // Cheek walls: flat beside the porch, then sloping with the steps, 30 cm above the nosings.
+  const pitch = Math.atan2(drop - rise, dFoot - porch);
+  const slopeLen = Math.hypot(dFoot - porch, drop - rise);
+  const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(fx, 0, fz), new THREE.Vector3(0, 1, 0), new THREE.Vector3(lx, 0, lz));
+  for (const s0 of [lat0 - 0.26, lat1]) {
+    const sh = new THREE.Shape();
+    sh.moveTo(0, bottom);
+    sh.lineTo(dFoot + 0.12, bottom);
+    sh.lineTo(dFoot + 0.12, floor - drop + rise + 0.3);
+    sh.lineTo(porch, floor + 0.3);
+    sh.lineTo(0, floor + 0.3);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.26, bevelEnabled: false });
+    const [x, z] = P(0, s0);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, 0, z).multiply(basis));
+    put('cheek', g);
+    const sc = s0 + 0.13;
+    // Only the flat part beside the porch is solid; the sloped part is low enough to step over.
+    const [cx, cz] = P(porch / 2, sc);
+    physics.addBox({ x: cx, y: (floor + 0.3 + bottom) / 2, z: cz, hx: 0.13, hy: (floor + 0.3 - bottom) / 2, hz: porch / 2, rotY: e.facing });
+    // Coping: flat over the porch, sloped over the steps, 2 cm proud of the wall each side.
+    box('coping', porch / 2, sc, floor + 0.33, porch, 0.3, 0.06);
+    const midD = (porch + dFoot) / 2;
+    const midY = floor + 0.33 - (drop - rise) / 2;
+    box('coping', midD, sc, midY, slopeLen + 0.06, 0.3, 0.06, pitch);
+    box('coping', dFoot + 0.06, sc, floor - drop + rise + 0.33, 0.14, 0.3, 0.06);
+    // Handrail 85 cm above the coping on posts, along the porch and down the steps.
+    const railH = 0.85;
+    const yAt = (d: number) => (d <= porch ? floor : floor - ((Math.min(d, dFoot) - porch) / (dFoot - porch)) * (drop - rise)) + 0.36;
+    const posts = [0.25, porch];
+    const nSlope = Math.max(1, Math.round((dFoot - porch) / 1.3));
+    for (let k = 1; k <= nSlope; k += 1) posts.push(porch + ((dFoot - 0.05 - porch) * k) / nSlope);
+    for (const d of posts) rod(d, sc, yAt(d) + railH / 2, railH, 0, true);
+    rod((0.25 + porch) / 2, sc, floor + 0.36 + railH, porch - 0.25 + 0.05, 0, false);
+    rod((porch + dFoot - 0.05) / 2, sc, (yAt(porch) + yAt(dFoot - 0.05)) / 2 + railH, Math.hypot(dFoot - 0.05 - porch, yAt(porch) - yAt(dFoot - 0.05)) + 0.05, pitch, false);
+  }
+  const mats: Record<string, THREE.MeshStandardMaterial> = {
+    stone: new THREE.MeshStandardMaterial({ color: '#bab2a3', roughness: 0.78 }),
+    nosing: new THREE.MeshStandardMaterial({ color: '#5d5952', roughness: 0.65 }),
+    cheek: new THREE.MeshStandardMaterial({ color: '#d8d0bf', roughness: 0.92 }),
+    coping: new THREE.MeshStandardMaterial({ color: '#9a9488', roughness: 0.7 }),
+    rail: new THREE.MeshStandardMaterial({ color: '#2a2e33', roughness: 0.35, metalness: 0.75 }),
+  };
+  for (const [k, list] of geos) {
+    const g = mergeGeometries(list, false);
+    for (const x of list) x.dispose();
+    if (!g) continue;
+    const m = new THREE.Mesh(g, mats[k]);
+    m.name = `entrance-stairs-${k}`;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+  }
+  // People wait on the porch beside the door, not halfway down the steps.
+  const [ex, ez] = P(porch * 0.55, 0);
+  e.x = ex;
+  e.z = ez;
+  e.y = floor;
+  return true;
+}
+
+/**
+ * Entrance: a landing at floor level, then equal steps (at most 16 cm) down to
+ * wherever the ground actually is at their foot (a platform, a path, a stairway).
+ */
+function doorSteps(group: THREE.Group, e: Entrance, floor: number, physics: PhysicsWorld, ground: CampusGround): void {
+  const yaw = e.facing;
+  const fx = Math.sin(yaw);
+  const fz = Math.cos(yaw);
   const stepMat = new THREE.MeshStandardMaterial({ color: '#a39e94', roughness: 0.9 });
   const flights: [number, number, number][] = [[0, 1.1, 0]];
   let count = 3;
@@ -1011,18 +1191,6 @@ function addDoor(group: THREE.Group, e: Entrance, label: string, floor: number, 
     group.add(step);
     if (top > bottom + 0.2) physics.addBox({ x: step.position.x, y: step.position.y, z: step.position.z, hx: w / 2, hy: (top - bottom) / 2, hz: depth / 2, rotY: yaw });
   }
-  if (!label) return;
-  const tex = signTexture(
-    [
-      { text: 'IOE · PASHCHIMANCHAL CAMPUS', size: 30, weight: 600, color: '#f2d27a', gap: 8 },
-      { text: label.toUpperCase(), size: label.length > 34 ? 38 : 50, weight: 700, color: '#ffffff' },
-    ],
-    { w: 1024, h: 200, bg: '#1d3f78', border: '#f2d27a' },
-  );
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 0.86), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
-  sign.position.set(e.doorX + fx * 0.08, floor + 2.95, e.doorZ + fz * 0.08);
-  sign.rotation.y = yaw;
-  group.add(sign);
 }
 
 // ==================================================================== kit: merged primitives

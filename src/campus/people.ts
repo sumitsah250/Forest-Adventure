@@ -39,10 +39,10 @@ const STUDENTS: Outfit[] = [
   { ...base, id: 'cq-s2', skin: '#9c6a4c', hair: '#120e0b', top: '#d8d4c8', topPattern: 'knit', trousers: '#22262e', trouserPattern: 'twill', boots: '#e4e2dc', headwear: 'none', backpack: null },
   { ...base, id: 'cq-s3', skin: '#c08d6c', hair: '#211812', top: '#3f6a4a', topPattern: 'knit', trousers: '#3a3f4a', trouserPattern: 'denim', boots: '#3a2c22', headwear: 'cap', headwearColor: '#1d2b44', backpack: '#6b3a2a' },
   { ...base, id: 'cq-s4', skin: '#a77352', hair: '#0f0c0a', top: '#4a4f8a', topPattern: 'canvas', trousers: '#5a5246', trouserPattern: 'canvas', boots: '#1e1e1e', headwear: 'none', backpack: '#1f3a2c' },
-  { ...base, id: 'cq-s5', skin: '#b98468', hair: '#1c1510', top: '#e0b040', topPattern: 'knit', trousers: '#2c3240', trouserPattern: 'denim', boots: '#f0eee8', headwear: 'none', backpack: null },
+  { ...base, id: 'cq-s5', skin: '#b98468', hair: '#1c1510', top: '#e0b040', topPattern: 'knit', trousers: '#2c3240', trouserPattern: 'denim', boots: '#f0eee8', headwear: 'none', backpack: null, hood: false },
   { ...base, id: 'cq-s6', skin: '#94664a', hair: '#15110e', top: '#26282c', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#c43c3c', headwear: 'beanie', headwearColor: '#8a2a2a', backpack: '#22252a' },
   { ...base, id: 'cq-s7', skin: '#b58262', hair: '#120e0c', top: '#b0475a', topPattern: 'knit', trousers: '#2a3140', trouserPattern: 'denim', boots: '#ecebe6', headwear: 'none', backpack: '#2e2f3a', female: true, hairStyle: 'long' },
-  { ...base, id: 'cq-s8', skin: '#a8724f', hair: '#16110d', top: '#e8e2d2', topPattern: 'knit', trousers: '#3b3f52', trouserPattern: 'twill', boots: '#2a2a2a', headwear: 'none', backpack: null, female: true, hairStyle: 'ponytail' },
+  { ...base, id: 'cq-s8', skin: '#a8724f', hair: '#16110d', top: '#e8e2d2', topPattern: 'knit', trousers: '#3b3f52', trouserPattern: 'twill', boots: '#2a2a2a', headwear: 'none', backpack: null, female: true, hairStyle: 'ponytail', hood: false },
   { ...base, id: 'cq-s9', skin: '#c08d6c', hair: '#1b1410', top: '#3d6b8a', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#f0eee8', headwear: 'none', backpack: '#6a5a3a', female: true, hairStyle: 'bun' },
   { ...base, id: 'cq-s10', skin: '#9c6a4c', hair: '#120e0b', top: '#2f4f3f', topPattern: 'plaid', trousers: '#2c3646', trouserPattern: 'denim', boots: '#1e1e1e', headwear: 'none', backpack: '#2a2a2e', hairStyle: 'textured', beard: true },
 ];
