@@ -44,3 +44,11 @@ Choices made while building Story V2 where the spec ([STORY_V2.md](STORY_V2.md))
 | 33 | The final choice | Stored in the save (`choices.mitraMemory`). It picks MITRA's last line in M10 and the line under the stars on the share card; nothing else changes. |
 | 34 | Credits | Rolled during the last shot of C10, from `ending.credits` in text.ts. They name the campus as the setting and say the story is fiction, so nobody reads it as an official campus production. |
 | 35 | Share card | 1080 × 1350 PNG drawn on a canvas: name, roll number, portrait, minutes to spare, total stars and the MITRA line. Download always; Share only where the browser can share files. |
+| 36 | Interlude rewards | Coins only for the first win of each mini-game (replays are for fun), plus Bug Hunt's daily snippet once a day. Chiya Rush gives c13 on a win. The scout drone is only earned in the story, not from menu replays. The boost charge is capped at one. |
+| 37 | Garage after M2 | An interlude like the others: Asha's line, the existing garage screen, her outro. |
+| 38 | Where Bug Hunt is played | From the pause menu (Mini-games), with no walk to the department, like every replay. The daily snippet is picked by date, so everyone gets the same one on the same day. 12 snippets. |
+| 39 | Drone Hack | The existing Simon light-pattern puzzle, five lights. |
+| 40 | The long wait | After M9 the HUD says to walk to the Exam Section, with a map marker. Coming within 8 m starts M10 (C8 first). A save made during the long wait resumes it. |
+| 41 | Shard riddles | Each memory shard opens the next unsolved old-story riddle (7 in all) if none is open; MITRA reads it out. Its answer is a real place, hidden until the player is within 16 m. Solving one pays 60 coins. |
+| 42 | Losing Chiya Rush | No c13 then; Krishna Dai repeats the gossip during the long wait (decision 18), and Q3 of the accusation also accepts c2, which is always on the board by M9. |
+| 43 | Scout drone display | Drones show as red dots on the minimap in Phase 7; the edge-of-screen arrows come with the visual sound cues in Phase 8. |

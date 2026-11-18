@@ -23,12 +23,21 @@ import { buildCampus } from './world.ts';
 import { crowd, populate, type Person } from './people.ts';
 import { GATE_ROAD } from './story/routes.ts';
 import { openShareCard } from './share.ts';
+import { decide, runMini, runPuzzle } from './minigames.ts';
+import type { MiniGame } from './minigames/types.ts';
+import { signalTuner } from './minigames/tuner.ts';
+import { chiyaRush } from './minigames/chiya.ts';
+import { tableTennis } from './minigames/pong.ts';
+import { bubbleLevel } from './minigames/bubble.ts';
+import { generatorPull } from './minigames/generator.ts';
+import { bugHunt } from './minigames/bughunt.ts';
+import { ShardRiddles } from './shardRiddles.ts';
 import { PLAYER_SUIT } from '../character/humanoid.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
 import { Extras } from './extras.ts';
-import { ACCUSATION, WRONG_ACCUSATION, CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky, type Where } from './story.ts';
+import { ACCUSATION, BUG_SNIPPETS, INTERLUDES, SHARD_RIDDLES, WRONG_ACCUSATION, type InterludeDef, CLUES, CUTSCENES, DEBUG_MODE, DEMO_MODE, FEST_BANNER, KART_HOME, MISSIONS, MISSION_COUNT, NPCS, STORY_VERSION, V2_TEXT, VOICES, WEATHER, powerLevel, type CutEvent, type ItemModel, type MissionDef, type Sky, type Where } from './story.ts';
 import { LocationCard, addToBoard, leaderboard, nameEntry } from './screens.ts';
 import { DebugPanel } from './debug.ts';
 import { Cutscenes } from './cutscene.ts';
@@ -687,7 +696,19 @@ async function boot(): Promise<void> {
     if (air > 1) slowmo(0.4);
   };
   people.push(...missions.people);
-  const extras = new Extras({ scene, ground, ui, profile, sound: (n) => audio.play(n), onCoins: () => missions.refreshHud(), kart: kart.root, track, reward });
+  const extras = new Extras({ scene, ground, ui, profile, sound: (n) => audio.play(n), onCoins: () => missions.refreshHud(), kart: kart.root, track, reward, onShard: () => void riddles?.offer() });
+  // Story 2: the old story's riddles as bonus riddles, one opened by each shard.
+  const riddles = STORY_VERSION === 2
+    ? new ShardRiddles({
+        scene, profile, riddles: SHARD_RIDDLES, text: V2_TEXT.shardRiddle,
+        resolve: (w, label) => missions.resolve(w, label, true),
+        heightAt: (x, z) => ground.heightAt(x, z),
+        dialog: (who, role, lines) => ui.dialog(who, role, lines, 'mitra'),
+        toast: (s, k) => ui.toast(s, k),
+        sound: (n) => audio.play(n),
+        reward: (at, coins) => reward(at, 'big', coins),
+      })
+    : null;
 
   // ------------------------------------------------------------------ cutscenes
   /** Scripted events a cutscene shot can fire by name (story/v2/cutscenes.ts lists them). */
@@ -851,6 +872,9 @@ async function boot(): Promise<void> {
     missions.refreshHud();
     if (!last) cinema.release();
     if (choice === 'garage') await new Promise<void>((res) => openGarage(res));
+    // Story 2: the mini-game after this mission (first completion only; decision 17).
+    const inter = STORY_VERSION === 2 && !r.replay && !last ? INTERLUDES.find((x) => x.after === r.mission.id) : undefined;
+    if (inter) await playInterlude(inter, false);
     if (last) {
       // Story 2: the share card, then back to the ending screen.
       const share = () => void openShareCard(ui, {
@@ -881,8 +905,26 @@ async function boot(): Promise<void> {
       showEnding();
       return;
     }
-    if (nextIndex >= 0) await missions.begin(nextIndex);
+    if (nextIndex >= 0 && nextIndex === SUNRISE) startLongWait();
+    else if (nextIndex >= 0) await missions.begin(nextIndex);
     else missions.stop();
+  };
+
+  // ------------------------------------------------------------------ the long wait (story 2)
+  /** Mission 10 in story 2: after mission 9 the player roams until they walk to the Exam Section. */
+  const SUNRISE = STORY_VERSION === 2 ? MISSIONS.findIndex((m) => m.id === 'v2-sunrise') : -1;
+  const exam = { x: 0, z: 0 };
+  let longWait = false;
+  let gossiping = false;
+  const startLongWait = () => {
+    const t = V2_TEXT.longWait;
+    const s = missions.resolve({ point: 'Exam Section' }, t.label);
+    exam.x = s.x;
+    exam.z = s.z;
+    longWait = true;
+    missions.stop();
+    missions.roamGoal = { obj: t.obj, sub: t.sub, target: { x: s.x, z: s.z, label: t.label } };
+    missions.refreshHud();
   };
 
   const touch = input.isTouch ? new TouchControls(uiRoot, input, (which) => (which === 'map' ? openMap() : openPause())) : null;
@@ -953,7 +995,14 @@ async function boot(): Promise<void> {
   };
 
   const continueStory = async () => {
-    if (profile.current) await startMission(profile.current.mission, profile.current.step);
+    if (!profile.current && profile.story === SUNRISE) {
+      // Saved during the long wait: roam again until the Exam Section.
+      void audio.start();
+      touch?.enterImmersive();
+      play();
+      setSky(SKIES.night);
+      startLongWait();
+    } else if (profile.current) await startMission(profile.current.mission, profile.current.step);
     else if (profile.story < MISSIONS.length) await startMission(profile.story);
     else {
       missions.stop();
@@ -1138,6 +1187,88 @@ async function boot(): Promise<void> {
     });
   };
 
+  // ------------------------------------------------------------------ interludes and mini-games (story 2)
+  const voiceOf = (id: string) => VOICES[id] ?? NPCS.find((n) => n.id === id) ?? { name: id, role: '' };
+  const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  /** Today's Bug Hunt snippet: the same for everyone on the same day. */
+  const dailySnippet = () => {
+    const d = new Date();
+    return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000) % BUG_SNIPPETS.length;
+  };
+  const miniFor = (d: InterludeDef): MiniGame | null => {
+    const m = V2_TEXT.mini;
+    switch (d.game) {
+      case 'tuner': return signalTuner(false, m.tuner);
+      case 'tunerJammed': return signalTuner(true, m.tuner);
+      case 'chiya': return chiyaRush(m.chiya);
+      case 'pong': return tableTennis(m.pong);
+      case 'bubble': return bubbleLevel(3, m.bubble);
+      case 'generator': return generatorPull(m.generator);
+      case 'bughunt': {
+        const daily = profile.bugDay !== today();
+        return bugHunt(BUG_SNIPPETS[daily ? dailySnippet() : Math.floor(Math.random() * BUG_SNIPPETS.length)], m.bug);
+      }
+      default: return null;
+    }
+  };
+  /**
+   * An interlude: location card, a few lines, the game, the outcome (decision 17). `menu`: a
+   * replay from the pause menu (no location card, no skip question, no scout drone).
+   */
+  const playInterlude = async (d: InterludeDef, menu: boolean): Promise<void> => {
+    const t = V2_TEXT.interlude;
+    const v = voiceOf(d.from);
+    if (!menu) {
+      locCard.show(d.clock, d.place);
+      if (profile.played[d.id] && (await decide(ui, { title: d.title, question: t.again, options: [t.play, t.skip] })) === 1) return;
+    }
+    audio.play('radioBeep');
+    await ui.dialog(v.name, v.role, d.intro, d.from);
+    const daily = d.game === 'bughunt' && profile.bugDay !== today();
+    if (d.game === 'bughunt') ui.toast(daily ? t.dailyNew.replace('{n}', String(d.reward.coins)) : t.dailyDone);
+    let ok = true;
+    if (d.game === 'garage') await new Promise<void>((res) => openGarage(res));
+    else if (d.game === 'hack') ok = await runPuzzle(ui, { type: 'simon', title: d.title, clue: d.clue, length: 5 }, '');
+    else {
+      const game = miniFor(d);
+      if (game) ok = (await runMini(ui, d.title, d.clue, '', game)).ok;
+    }
+    // Coins for the first win of each game, and for each day's Bug Hunt.
+    const firstWin = ok && (profile.played[d.id] ?? 0) < 2 && d.game !== 'bughunt';
+    profile.played[d.id] = Math.max(profile.played[d.id] ?? 0, ok ? 2 : 1);
+    if (ok) {
+      if ((firstWin || daily) && d.reward.coins) {
+        profile.coins += d.reward.coins;
+        ui.toast(`${d.title} ${t.reward.replace('{n}', String(d.reward.coins))}`, 'good');
+      }
+      if (daily) profile.bugDay = today();
+      if (d.reward.clue && profile.clues[d.reward.clue] !== 'gold') clueBook?.find(d.reward.clue, 'gold');
+      if (d.reward.scout && !menu) profile.scout = profile.story;
+      if (d.reward.boostCharge) {
+        profile.boostCharges = 1;
+        ui.toast(t.boost, 'good');
+      }
+    }
+    saveProfile(profile);
+    missions.refreshHud();
+    await ui.dialog(v.name, v.role, ok ? d.win : d.lose, d.from);
+  };
+  /** Pause → Mini-games: every game played so far, plus Bug Hunt. */
+  const openMinisMenu = async (onClose: () => void) => {
+    const prev = state;
+    state = 'menu';
+    audio.suspend(false);
+    const t = V2_TEXT.interlude;
+    const list = INTERLUDES.filter((d) => d.game !== 'garage' && (d.after === null || profile.played[d.id]));
+    const i = await decide(ui, { title: t.menuTitle, question: t.menuSub, options: [...list.map((d) => d.title), t.back] });
+    if (i < list.length) await playInterlude(list[i], true);
+    state = prev === 'menu' ? 'title' : prev;
+    onClose();
+  };
+
   // ------------------------------------------------------------------ campus screens (story 2)
   /** A cutscene can switch the screens before the story does (C3). */
   let screensForced: 'intruder' | 'reopened' | 'hero' | 'off' | null = null;
@@ -1180,6 +1311,8 @@ async function boot(): Promise<void> {
       onRadioLog: () => openRadioLog(back),
       onBoard: STORY_VERSION === 2 && has(profile, 'board') ? () => openBoardMenu(back) : null,
       boardLabel: V2_TEXT.clueUi.boardTitle,
+      onMinis: STORY_VERSION === 2 ? () => void openMinisMenu(back) : null,
+      minisLabel: V2_TEXT.interlude.menu,
       onRestart: missions.def ? () => void missions.restart().then(play) : null,
       onTitle: toTitle,
     });
@@ -1284,7 +1417,7 @@ async function boot(): Promise<void> {
   const debug = DEBUG_MODE
     ? new DebugPanel(uiRoot, {
         missions: MISSIONS.map((m) => m.title),
-        interludes: [],
+        interludes: INTERLUDES.map((d) => d.title),
         jump: (i) => {
           ui.close();
           if (cutscenes.playing) cutscenes.skip();
@@ -1299,7 +1432,11 @@ async function boot(): Promise<void> {
           tarp.clear();
           void startMission(i, 0, false);
         },
-        interlude: () => undefined,
+        interlude: (i) => {
+          ui.close();
+          if (cutscenes.playing) cutscenes.skip();
+          void playInterlude(INTERLUDES[i], true);
+        },
         clues: (kind) => {
           for (const c of CLUES) {
             if (kind === 'clear') delete profile.clues[c.id];
@@ -1574,6 +1711,36 @@ async function boot(): Promise<void> {
     const f = focus();
     const interact = playing && input.pressed('interact');
     missions.update(adt, playing, f, interact && mode === 'foot', mode === 'foot' ? kart.position : null, playing && mode === 'foot' && input.held('interact'));
+    // Story 2: the long wait after mission 9, the shard riddles, and the stored boost charge.
+    if (longWait && playing && missions.index < 0) {
+      if (Math.hypot(f.x - exam.x, f.z - exam.z) < 8) {
+        longWait = false;
+        missions.roamGoal = null;
+        void startMission(SUNRISE);
+      } else if (!profile.clues.c13 && mode === 'foot' && !missions.promptText && !ui.modal && !gossiping) {
+        // Decision 18: Krishna Dai repeats the gossip if the player never won Chiya Rush.
+        const k = missions.npcSpot('krishna');
+        if (k && Math.hypot(f.x - k.pos.x, f.z - k.pos.z) < 3) {
+          ui.setPrompt(V2_TEXT.longWait.krishnaPrompt);
+          if (interact) {
+            gossiping = true;
+            const v = voiceOf('krishna');
+            void ui.dialog(v.name, v.role, V2_TEXT.longWait.krishna, 'krishna').then(() => {
+              clueBook?.find('c13', 'gold');
+              gossiping = false;
+            });
+          }
+        }
+      }
+    }
+    riddles?.update(playing, !!missions.def, f, mode === 'kart');
+    if (mode === 'kart' && profile.boostCharges > 0 && kart.boostUnlocked && kart.boost <= 0.02) {
+      kart.boost = 1;
+      profile.boostCharges -= 1;
+      saveProfile(profile);
+      ui.toast(V2_TEXT.interlude.boostUsed, 'good');
+      audio.play('boost');
+    }
     const busyTrial = !!missions.stepDef && (missions.stepDef.kind === 'drive' || missions.stepDef.kind === 'chase');
     extras.update(adt, playing, f, mode === 'kart', busyTrial);
     if (playing && mode === 'foot' && !missions.promptText) {

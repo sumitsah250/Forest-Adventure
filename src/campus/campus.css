@@ -847,3 +847,16 @@ body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
   .cq-board.accuse .cq-board__slot small { font-weight: 700; line-height: 1.25; }
   .cq-board__msg { min-height: 0; font-size: 13px; }
 }
+
+/* ---------------------------------------------------------------- Phase 7: mini-games */
+.mg-scope.mg-vial { height: auto; max-height: 46vh; object-fit: contain; }
+.mg-table { cursor: ns-resize; }
+.mg-ticket { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #fff8e6; color: #2a1f12; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3); }
+.mg-ticket b { margin-right: 4px; }
+.mg-ticket span { padding: 4px 9px; border-radius: 999px; background: #efe2c4; font-size: 14px; font-weight: 700; transition: background 0.2s, color 0.2s; }
+.mg-ticket span.done { background: #2f9e5a; color: #fff; }
+.mg-ticket.shake { animation: cq-shake 0.4s; }
+.mg-chiya { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.mg-chiya__item { display: grid; justify-items: center; gap: 4px; min-height: 64px; padding: 10px 6px; border: 0; border-radius: 12px; background: #3a2a18; color: #fff3dc; font: 700 14px var(--font); cursor: pointer; touch-action: manipulation; }
+.mg-chiya__item:active { transform: scale(0.96); background: #5a3f22; }
+@media (max-width: 520px) { .mg-chiya { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -512,6 +512,8 @@ export function choose(host: ModalHost, o: { title: string; question: string; op
   return f.promise;
 }
 
+const DIGITS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
+
 /** A choice with no wrong answer (mission 10's last question). Resolves with the option's index. */
 export function decide(host: ModalHost, o: { title: string; question: string; options: string[] }): Promise<number> {
   return new Promise((resolve) => {
@@ -534,7 +536,7 @@ export function decide(host: ModalHost, o: { title: string; question: string; op
     if (TEST) card.dataset.answer = '1';
     ov.append(card);
     host.keyHandler = (e) => {
-      const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+      const n = DIGITS.indexOf(e.code);
       if (n >= 0 && n < o.options.length) {
         e.preventDefault();
         pick(n);

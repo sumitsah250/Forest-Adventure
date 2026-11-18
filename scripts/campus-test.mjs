@@ -118,6 +118,7 @@ try {
           return { ui: 'cutscene' };
         }
         if (q('.cq-complete')) return { ui: 'complete' };
+        if (q('.cq-garage')) return { ui: 'garage' };
         if (q('.cq-board')) return { ui: q('.cq-board.accuse') ? (q('.cq-board.solved') ? 'cine' : 'accuse') : 'board' };
         if (q('.cq-ending')) return { ui: 'ending' };
         const card = q('.cq-quiz');
@@ -134,7 +135,8 @@ try {
       same = key === lastKey ? same + 1 : 0;
       lastKey = key;
       if (same > 60) throw new Error(`stuck at ${key}`);
-      if (s.ui === 'board') await page.click('.cq-board > .cq-btn');
+      if (s.ui === 'garage') await page.click('.cq-garage .cq-btn--primary');
+      else if (s.ui === 'board') await page.click('.cq-board > .cq-btn');
       else if (s.ui === 'accuse') {
         await shot('accuse');
         await page.evaluate(() => window.__boardSolve?.());
@@ -178,7 +180,7 @@ try {
         } else if (s.ans) await page.keyboard.press(`Digit${s.ans}`);
         else await page.evaluate(() => window.__mgSolve?.());
         await wait(150);
-      } else if (!s.kind) await wait(300);
+      } else if (!s.kind && !s.target) await wait(300);
       else if (s.kind === 'kart' || ((s.kind === 'drive' || s.kind === 'chase') && s.mode !== 'kart')) {
         await page.evaluate(() => {
           const c = window.__campus;

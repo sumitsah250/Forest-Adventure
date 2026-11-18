@@ -93,6 +93,78 @@ export const T = {
       holding: 'Hold it… {p}%',
       find: 'Centre the bubble between the marks. {s} s',
     },
+    tuner: {
+      find: 'Turn the dial until the waves match. {s} s',
+      locked: 'Locked on… {p}%',
+      ok: 'Signal clear. The call comes through.',
+      fail: 'Only static. Try the dial again.',
+      jammed: 'MITRA is jamming the band. Chase the signal as it drifts.',
+    },
+    chiya: {
+      items: ['Milk tea', 'Black tea', 'Lemon tea', 'Samosa'],
+      order: 'Order {n}',
+      status: 'Served {n} of {need} · {s} s',
+      wrong: 'Wrong one! Start that order again.',
+      ok: 'Every order served hot. Krishna Dai is impressed.',
+      fail: 'The queue got away from you. Try again.',
+    },
+    pong: {
+      score: 'You {a} : {b} Raju',
+      serve: 'First to five. Drag, or use W / S or the arrows.',
+      ok: 'You beat Raju, {a} to {b}.',
+      fail: 'Raju wins, {b} to {a}. He is smiling, at least.',
+    },
+    generator: {
+      status: 'Pulls: {n} of 3 · {s} s',
+      hint: 'Pull (tap, or press Space) when the marker hits the green.',
+      miss: 'Too early or too late. The rhythm starts again.',
+      ok: 'Brrrm! The generator catches.',
+      fail: 'It coughed and died. Find the rhythm and try again.',
+    },
+    bug: {
+      status: 'Tap the line with the bug · {s} s',
+      ok: 'Found it in {s} s.',
+      fail: 'Time is up. The bug was on line {n}.',
+      wrong: 'Not that line. The bug was on line {n}.',
+    },
+  },
+
+  /** Mini-games between missions (interludes.ts). */
+  interlude: {
+    play: 'Play',
+    skip: 'Skip',
+    again: 'You have played this before.',
+    menu: 'Mini-games',
+    menuTitle: 'Mini-games',
+    menuSub: 'Every mini-game you have played, plus the daily Bug Hunt.',
+    back: 'Back',
+    reward: '+{n}◈',
+    dailyDone: 'Daily Bug Hunt solved today. Come back tomorrow for a new snippet.',
+    dailyNew: 'Daily Bug Hunt: +{n}◈ for today\'s snippet.',
+    scout: 'Scout drone ready: every drone in the next mission shows on your map.',
+    boost: 'Boost charge stored: Kalki refills once when the boost runs dry.',
+    boostUsed: 'Boost charge used. Kalki is full again!',
+  },
+
+  /** After mission 9: free roam until the player walks to the Exam Section. */
+  longWait: {
+    obj: 'Walk to the Exam Section when you are ready',
+    sub: 'Nothing happens until you go. Talk to people, find shards, or rest.',
+    label: 'Exam Section',
+    krishnaPrompt: 'Talk to Krishna Dai',
+    krishna: [
+      'Still awake? Me too, and chiya is free tonight.',
+      'People say Sunil dai\'s contract ends this month. MITRA replaces his paid system.',
+    ],
+  },
+
+  /** Old story riddles, now bonus riddles that memory shards unlock. */
+  shardRiddle: {
+    who: 'MITRA',
+    role: 'memory shard',
+    intro: 'A memory came back with that shard. It is a riddle about a place on campus.',
+    found: 'Riddle solved! +{n}◈',
+    near: 'This is the place! Find it…',
   },
 
   /** Asha hands over a clue the player missed, at the end of its mission (it becomes a silver card). */

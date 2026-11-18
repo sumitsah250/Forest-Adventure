@@ -10,10 +10,11 @@
 import * as v1 from './story/v1.ts';
 import * as v2 from './story/v2/index.ts';
 import { CUTSCENES as V2_CUTSCENES } from './story/v2/cutscenes.ts';
-import type { ClueDef, ClueId, CutsceneDef } from './story/types.ts';
+import type { ClueDef, ClueId, CutsceneDef, Step } from './story/types.ts';
 
 export type { Anchor, ClueDef, ClueId, CutEvent, CutsceneDef, CutsceneId, Ease, ItemDef, ItemModel, MissionDef, NpcDef, PuzzleDef, ShotDef, Sky, Step, TodoId, Where } from './story/types.ts';
 export { KART_HOME, TRIAL_MEDALS, TRIAL_ROUTE } from './story/routes.ts';
+export type { InterludeDef, InterludeGame } from './story/v2/index.ts';
 
 /** Flip to 2 when V2 is ready to be the game people get. */
 export const DEFAULT_STORY_VERSION: 1 | 2 = 1;
@@ -56,5 +57,13 @@ export const STORY_BLURB = story.STORY_BLURB;
 export const powerLevel = story.powerLevel;
 /** Cutscene shot data by id (story 1 has none; its mission intros are built in main.ts). */
 export const CUTSCENES: Partial<Record<string, CutsceneDef>> = STORY_VERSION === 2 ? V2_CUTSCENES : {};
+/** Mini-games between missions (story 2 only), and Bug Hunt's snippets. */
+export const INTERLUDES = STORY_VERSION === 2 ? v2.INTERLUDES : [];
+export const BUG_SNIPPETS = v2.BUG_SNIPPETS;
+/**
+ * Story 2 has no riddles in its missions: the old story's riddles come back as bonus riddles
+ * that memory shards unlock.
+ */
+export const SHARD_RIDDLES = STORY_VERSION === 2 ? v1.MISSIONS.flatMap((m) => m.steps.filter((s): s is Extract<Step, { kind: 'riddle' }> => s.kind === 'riddle')) : [];
 /** Words on the fest banner over the main gate (story 2 only). */
 export const FEST_BANNER: { title: string; sub: string } | null = STORY_VERSION === 2 ? { title: v2.T.props.festBanner, sub: v2.T.props.festBannerSub } : null;

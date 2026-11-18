@@ -52,6 +52,17 @@ export interface Profile {
   radioLog: { m: string; who: string; text: string; clue?: string; pinned?: boolean }[];
   /** V2: the answers to the story's choices with no wrong answer (mission 10: 'remember' or 'forget'). */
   choices: Record<string, string>;
+  /** V2 interludes played: 1 played, 2 won at least once (the first win pays). */
+  played: Record<string, number>;
+  /** V2: the mission index that gets the scout drone (Drone Hack), or null. */
+  scout: number | null;
+  /** V2: stored boost refills (Generator Pull-Start), used when Kalki's boost runs dry. */
+  boostCharges: number;
+  /** V2: shard riddles solved, and the one being looked for (indexes into SHARD_RIDDLES). */
+  riddles: number[];
+  riddleActive: number | null;
+  /** V2: the day ("2026-11-17") the daily Bug Hunt was last solved. */
+  bugDay: string;
 }
 
 function fresh(): Profile {
@@ -83,6 +94,12 @@ function fresh(): Profile {
     minutes: 30,
     radioLog: [],
     choices: {},
+    played: {},
+    scout: null,
+    boostCharges: 0,
+    riddles: [],
+    riddleActive: null,
+    bugDay: '',
   };
 }
 
@@ -148,6 +165,8 @@ export function resetStory(p: Profile): void {
   p.minutes = 30;
   p.radioLog = [];
   p.choices = {};
+  p.scout = null;
+  p.boostCharges = 0;
 }
 
 export function has(p: Profile, unlock: string): boolean {

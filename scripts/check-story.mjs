@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (p) => import(pathToFileURL(join(root, p)).href);
-const { CAST, NPCS, VOICES, CLUES, ACCUSATION, WRONG_ACCUSATION, MISSIONS, MISSION_COUNT, WEATHER, T } = await load('src/campus/story/v2/index.ts');
+const { CAST, NPCS, VOICES, CLUES, ACCUSATION, WRONG_ACCUSATION, MISSIONS, MISSION_COUNT, WEATHER, T, INTERLUDES, BUG_SNIPPETS } = await load('src/campus/story/v2/index.ts');
 const routes = await load('src/campus/story/routes.ts');
 const map = JSON.parse(readFileSync(join(root, 'src/campus/campusData.json'), 'utf8'));
 let cutscenes = null;
@@ -191,6 +191,31 @@ MISSIONS.forEach((m, mi) => {
     }
   });
 });
+// ------------------------------------------------------------------ interludes (Phase 7)
+const GAMES = new Set(['tuner', 'tunerJammed', 'chiya', 'pong', 'bubble', 'hack', 'generator', 'bughunt', 'garage']);
+const interludeIds = new Set();
+for (const d of INTERLUDES) {
+  const ctx = `interlude ${d.id}`;
+  if (interludeIds.has(d.id)) err(`${ctx}: duplicate id`);
+  interludeIds.add(d.id);
+  if (d.after !== null && !missionIds.has(d.after)) err(`${ctx}: unknown mission "${d.after}"`);
+  if (!GAMES.has(d.game)) err(`${ctx}: unknown game "${d.game}"`);
+  if (!VOICES[d.from] && !npcIds.has(d.from)) err(`${ctx}: unknown speaker "${d.from}"`);
+  if (CAST[d.from]?.realStaff) err(`${ctx}: real staff member ${d.from} cannot appear in an interlude`);
+  for (const [k, list] of [['intro', d.intro], ['win', d.win], ['lose', d.lose]]) list.forEach((l, i) => checkCard(l, `${ctx} ${k} card ${i + 1}`));
+  if (d.reward.clue) {
+    if (!clueIds.has(d.reward.clue)) err(`${ctx}: unknown clue ${d.reward.clue}`);
+    else if (found.has(d.reward.clue)) err(`${ctx}: clue ${d.reward.clue} is already found in ${found.get(d.reward.clue)}`);
+    else found.set(d.reward.clue, ctx);
+  }
+}
+for (const g of GAMES) if (!INTERLUDES.some((d) => d.game === g)) err(`mini-game ${g} has no interlude`);
+if (BUG_SNIPPETS.length < 10) err(`Bug Hunt needs at least 10 snippets, found ${BUG_SNIPPETS.length}`);
+BUG_SNIPPETS.forEach((s, i) => {
+  if (s.lines.length !== 6) err(`Bug Hunt snippet ${i + 1}: ${s.lines.length} lines (needs 6)`);
+  if (s.bug < 0 || s.bug >= s.lines.length) err(`Bug Hunt snippet ${i + 1}: bug line out of range`);
+});
+for (const k of ['krishna']) T.longWait[k].forEach((l, i) => checkCard(l, `long wait ${k} card ${i + 1}`));
 for (const id of Object.keys(WEATHER)) if (!missionIds.has(id)) err(`WEATHER: unknown mission "${id}"`);
 for (const [id, c] of staff) if (!missionIds.has(c.mission)) err(`real staff member ${id}: unknown mission "${c.mission}"`);
 

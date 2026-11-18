@@ -39,8 +39,14 @@ Work is on the `story-v2` branch, one commit per phase.
 - `check:story` reports **0 stubs**; every referenced cutscene has shot data.
 - New sounds: motorbike rev, tyre skid, crowd cheer (synthesised).
 
+### Phase 7: mini-games, interludes, the long wait, shard riddles
+- **Mini-game modules** on one interface (`start`, `update`, `finish`; `src/campus/minigames/`): Signal Tuner (and jammed), Chiya Rush, Table Tennis with Raju, Bubble Level, Generator Pull-Start, Bug Hunt; Drone Hack uses the Simon puzzle. Touch (tap / drag) and keyboard on each.
+- **Interludes** (`story/v2/interludes.ts`): after M1 tuner, M2 garage, M3 Chiya Rush (c13), M4 table tennis, M5 bubble level, M6 jammed tuner, M7 drone hack (scout drone: drones on the minimap next mission), M8 generator (one boost refill). Location card, lines before and after; Play / Skip once played. Pause → **Mini-games** replays any played game, plus the **daily Bug Hunt** (12 C snippets).
+- **The long wait** after M9: free roam, objective and map marker for the Exam Section; walking there starts M10 with C8. Krishna Dai gives c13 at the Cafeteria if it is still missing.
+- **Shard riddles**: each memory shard opens one of the old story's 7 riddles; find the place for 60 coins.
+- Debug panel interlude jumps; `check:story` validates interludes and snippets and reports 0 stubs.
+
 ## Left
-- Phase 7: the mini-games, interludes, the long wait after M9 (Krishna Dai and c13), old riddles on memory shards.
 - Phase 8: sound direction and music (including the music cut in C7), MITRA's voice, par times, performance presets, strings export.
 - Phase 9: graphics, mobile, Kalki, menu (see BUILD_PLAN.md).
 
@@ -52,5 +58,7 @@ Work is on the `story-v2` branch, one commit per phase.
 - Whole story through the real UI: `node scripts/campus-test.mjs play low 2` (screenshots in `test-results/`).
 - Phase 6 by hand: debug panel → M9, talk your way to the board; or M10 to watch C8, then drive the chase to the gate for C9. Finishing the story for the first time (M10, then the Sunrise Fest scene) shows the ending screen with the share card.
 
+- Phase 7 by hand: debug panel → Interlude → any mini-game; or pause → Mini-games. For the long wait, jump to M9 and finish it.
+
 ## Next step
-Phase 7: build the mini-game framework on `runMini` (src/campus/minigames.ts), starting with Signal Tuner and Chiya Rush (which gives c13), then the interludes between missions (decision 17) with debug jumps.
+Phase 8: save the SOUND DIRECTION section of BUILD_PLAN.md as docs/SOUND.md, then add the five audio buses with volume sliders (music, ambience, sfx, voice, ui) in src/audio/audio.ts and the settings screen.

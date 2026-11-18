@@ -224,6 +224,10 @@ export class Missions {
   private fadeMats: THREE.MeshStandardMaterial[] = [];
   /** 0..1: how much a fading step has turned the drizzle into a downpour (main reads it). */
   rainBoost = 0;
+  /** Free roam with somewhere to go (story 2's long wait after mission 9). */
+  roamGoal: { obj: string; sub: string; target: NavTarget } | null = null;
+  /** Drone Hack's scout drone: every drone of this mission shows on the map (decision 13). */
+  private scout = false;
   private locationPending = false;
   private alarmHigh = false;
   /** Floor height for people and items (steps, landings and terraces included). */
@@ -306,6 +310,9 @@ export class Missions {
     // Resuming part-way: coins already missed, so "every coin" cannot be judged fairly.
     if (step > 0) this.bonus = this.bonus.map((b) => (b.id === 'allCoins' ? { ...b, state: 'failed' as const } : b));
     this.c.ui.setBonus(this.bonus.length ? this.bonus : null);
+    this.scout = !!d && this.c.profile.scout === index;
+    if (this.scout) this.c.ui.toast(V2_TEXT.interlude.scout, 'good');
+    if (d) this.roamGoal = null;
     if (!d) {
       this.clearStep();
       this.refreshHud();
@@ -882,6 +889,8 @@ export class Missions {
       this.c.onUnlock(u);
     }
     if (first) p.story = index + 1;
+    if (p.scout === index) p.scout = null;
+    this.scout = false;
     p.current = null;
     saveProfile(p);
     this.clearStep();
@@ -917,7 +926,8 @@ export class Missions {
     ui.setXp(lv.level, lv.into / lv.need);
     if (!d) {
       ui.setMission('Free roam', '');
-      ui.setObjective('Explore the campus', 'Replay missions for stars (pause menu) · find memory shards · drive the time trial');
+      if (this.roamGoal) ui.setObjective(this.roamGoal.obj, this.roamGoal.sub);
+      else ui.setObjective('Explore the campus', 'Replay missions for stars (pause menu) · find memory shards · drive the time trial');
       return;
     }
     ui.setMission(this.index < MISSION_COUNT ? `Mission ${this.index + 1} / ${MISSION_COUNT} · ${d.title}` : `Ending · ${d.title}`, d.clock);
@@ -986,8 +996,18 @@ export class Missions {
 
   /** The current navigation target and any secondary markers. */
   targets(kart: THREE.Vector3 | null): { main: NavTarget | null; extra: NavTarget[] } {
+    const r = this.stepTargets(kart);
+    if (!this.scout || (!this.patrols.length && !this.pursuer)) return r;
+    // The scout drone marks every enemy drone.
+    const extra = r.extra.slice();
+    for (const pt of this.patrols) extra.push({ x: pt.drone.ground.x, z: pt.drone.ground.y, label: '', danger: true });
+    if (this.pursuer) extra.push({ x: this.pursuer.x, z: this.pursuer.z, label: '', danger: true });
+    return { main: r.main, extra };
+  }
+
+  private stepTargets(kart: THREE.Vector3 | null): { main: NavTarget | null; extra: NavTarget[] } {
     const st = this.stepDef;
-    if (!st) return { main: null, extra: [] };
+    if (!st) return { main: this.index < 0 && this.roamGoal ? this.roamGoal.target : null, extra: [] };
     const p = this.focus;
     switch (st.kind) {
       case 'talk':

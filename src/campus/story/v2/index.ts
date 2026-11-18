@@ -4,3 +4,4 @@ export { CAST, NPCS, VOICES } from './cast.ts';
 export { ACCUSATION, CLUES, QUIET_CLUES, WRONG_ACCUSATION } from './clues.ts';
 export { MISSIONS, MISSION_COUNT, STORY_BLURB, WEATHER, powerLevel } from './missions.ts';
 export { T } from './text.ts';
+export { BUG_SNIPPETS, INTERLUDES, type InterludeDef, type InterludeGame } from './interludes.ts';

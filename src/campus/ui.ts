@@ -18,6 +18,8 @@ export interface NavTarget {
   x: number;
   z: number;
   label: string;
+  /** A drone (the scout drone's markers): drawn red and small. */
+  danger?: boolean;
 }
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] => {
@@ -530,7 +532,7 @@ export class CampusUI implements ModalHost {
     };
     for (const s of shards) marker(s, '#38e1ff', 4, false);
     if (kart) marker(kart, '#c8202e', 5);
-    for (const e of extra) marker(e, '#e9a23b', 5);
+    for (const e of extra) marker(e, e.danger ? '#ff3b3b' : '#e9a23b', e.danger ? 4 : 5);
     if (target) marker(target, '#f2c84b', 7);
     // Player arrow (always up).
     c.save();
@@ -888,7 +890,7 @@ export class CampusUI implements ModalHost {
     ov.append(box);
   }
 
-  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onBoard?: (() => void) | null; boardLabel?: string; onTitle: () => void }): void {
+  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onBoard?: (() => void) | null; boardLabel?: string; onMinis?: (() => void) | null; minisLabel?: string; onTitle: () => void }): void {
     const ov = this.open('cq-overlay--pause');
     const box = el('div', 'cq-title cq-title--small', '<div class="cq-title__name">PAUSED</div>');
     const menu = el('div', 'cq-menu');
@@ -898,6 +900,7 @@ export class CampusUI implements ModalHost {
       ['Garage', o.onGarage, ''],
       ['Missions', o.onMissions, ''],
       [o.boardLabel ?? '', o.onBoard ?? null, ''],
+      [o.minisLabel ?? '', o.onMinis ?? null, ''],
       ['Goals & badges', o.onProgress, ''],
       ['Radio log', o.onRadioLog, ''],
       ['Restart this mission', o.onRestart, ''],

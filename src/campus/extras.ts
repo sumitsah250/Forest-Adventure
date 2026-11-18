@@ -65,6 +65,8 @@ export interface ExtrasContext {
   kart?: THREE.Object3D;
   track?: (e: GoalEvent) => void;
   reward?: (at: THREE.Vector3, kind: 'small' | 'medium' | 'big', coins: number) => void;
+  /** A memory shard was picked up (story 2 opens a bonus riddle). */
+  onShard?: () => void;
 }
 
 export class Extras {
@@ -158,6 +160,7 @@ export class Extras {
         saveProfile(p);
         this.c.onCoins();
         this.refresh();
+        this.c.onShard?.();
       }
     }
 

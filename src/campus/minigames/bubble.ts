@@ -26,7 +26,8 @@ export function bubbleLevel(hold: number, text: BubbleText): MiniGame {
   let t = 0;
   let done = false;
   let ok = false;
-  let shown = '';
+  let shownP = -2;
+  let shownS = -1;
   const ZONE = 0.12;
   const game: MiniGame = {
     start(ctx) {
@@ -92,10 +93,13 @@ export function bubbleLevel(hold: number, text: BubbleText): MiniGame {
       g.beginPath();
       g.ellipse(bx, 60, 22, 14, 0, 0, Math.PI * 2);
       g.fill();
-      const s = held > 0 ? text.holding.replace('{p}', String(Math.min(100, Math.round((held / hold) * 100)))) : text.find.replace('{s}', String(Math.ceil(left)));
-      if (s !== shown) {
-        status.textContent = s;
-        shown = s;
+      // The status text changes only when its number does (no strings built every frame).
+      const p = held > 0 ? Math.min(100, Math.round((held / hold) * 100)) : -1;
+      const sec = Math.ceil(left);
+      if (p !== shownP || (p < 0 && sec !== shownS)) {
+        shownP = p;
+        shownS = sec;
+        status.textContent = p >= 0 ? text.holding.replace('{p}', String(p)) : text.find.replace('{s}', String(sec));
       }
       if (held >= hold) {
         done = true;
