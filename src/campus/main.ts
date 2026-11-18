@@ -930,6 +930,8 @@ async function boot(): Promise<void> {
     missions.refreshHud();
   };
 
+  // style.css only shows the touch layer (joystick, buttons, map) under body.is-touch.
+  if (input.isTouch) document.body.classList.add('is-touch');
   const touch = input.isTouch ? new TouchControls(uiRoot, input, (which) => (which === 'map' ? openMap() : openPause())) : null;
   touch?.setVisible(false);
 
@@ -1780,6 +1782,7 @@ async function boot(): Promise<void> {
         mode: mode === 'kart' ? 'vehicle' : 'foot',
         prompt: missions.promptText ? { text: missions.promptText, progress: 0 } : null,
         radio: null, armed: false, drawn: false, needsRecovery: mode === 'kart' && kart.vehicle.needsRecovery, flashlight: false, lights: kart.vehicle.lightsOn,
+        boost: kart.boostUnlocked,
       });
     }
     const ph = kart.vehicle.phys;

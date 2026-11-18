@@ -885,3 +885,25 @@ body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
 .cq-quiz .mg-skip { justify-self: start; align-self: flex-start; margin-top: 6px; font: 700 13px var(--font); padding: 7px 14px; border-radius: 8px; background: transparent; color: #4a3a26; border: 1.5px solid rgba(74, 58, 38, 0.45); box-shadow: none; }
 .cq-quiz .mg-skip:hover { background: rgba(74, 58, 38, 0.08); }
 @media (prefers-reduced-motion: reduce) { .cq-board__who.hint, .cq-board__card.hint { animation: none; } }
+
+/* ---------------------------------------------------------------- phones and tablets (body.is-touch)
+   The touch layer (src/ui/touch.ts) owns the corners: joystick / steering bottom left, action buttons bottom
+   right, the menu row (torch, hint, journal, map, pause) top right. The HUD moves out of their way:
+   stats under the menu row, the minimap under the stats, Call Kalki bottom centre. */
+body.is-touch .cq-stats { top: 62px; right: max(14px, calc(env(safe-area-inset-right) + 6px)); padding: 6px 10px; }
+body.is-touch .cq-hearts { font-size: 15px; letter-spacing: 2px; }
+body.is-touch .cq-coins { font-size: 14px; margin-top: 1px; }
+body.is-touch .cq-lvl { margin-top: 2px; font-size: 11px; }
+body.is-touch .cq-mini { top: 140px; bottom: auto; right: max(14px, calc(env(safe-area-inset-right) + 6px)); width: 88px; height: 88px; }
+/* Keyboard hints mean nothing on a phone: the buttons say what they do. */
+body.is-touch .cq-speed__hint, body.is-touch .cq-btn kbd { display: none; }
+body.is-touch .cq-mini__hint { display: none; }
+body.is-touch .cq-hud .cq-callkart { right: auto; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
+body.is-touch .cq-hud .cq-callkart:active { transform: translate(-50%, 3px); }
+body.is-touch .cq-hud .cq-callkart kbd { display: none; }
+body.is-touch .cq-compass { top: 10px; width: min(300px, 36vw); }
+/* Driving: the speedometer sits between the steering arrows and the pedals. */
+body.is-touch .cq-speed { bottom: max(10px, env(safe-area-inset-bottom)); }
+@media (max-height: 340px) {
+  body.is-touch .cq-mini { display: none; }
+}

@@ -1,8 +1,10 @@
-// Touch controls for tablets/phones. A floating joystick appears wherever the
-// left thumb lands (push past the ring to sprint); the right side is a
-// drag-to-look surface with a context-sensitive thumb cluster that changes
-// between on foot, armed and driving. Interactions pop up as a labelled
-// button only when something is in reach.
+// Touch controls for tablets/phones, laid out like the big mobile shooters:
+// - On foot: a joystick bottom left (it jumps under the thumb anywhere in the left zone). Push past the
+//   ring to sprint; push on up onto the lock above it and let go to keep running hands-free (touch the
+//   stick again to stop). Drag anywhere else to look. Jump / crouch (and weapons) on the right thumb.
+// - Driving: steering arrows bottom left; gas and brake / reverse pedals, boost, drift, view and exit on
+//   the right. Dragging the rest of the screen still turns the camera.
+// Interactions pop up as a labelled button only when something is in reach.
 
 import type { Input, Action } from '../core/input.ts';
 import { el } from './hud.ts';
@@ -20,24 +22,32 @@ export interface TouchContext {
   needsRecovery: boolean;
   flashlight: boolean;
   lights: boolean;
+  /** The vehicle has a boost (shows the Boost button while driving). */
+  boost?: boolean;
 }
 
 type ButtonId =
   | 'jump' | 'crouch' | 'draw' | 'fire' | 'aim' | 'reload' | 'swap' | 'holster'
-  | 'brake' | 'lights' | 'camera' | 'recover' | 'exit';
+  | 'gas' | 'rev' | 'boost' | 'brake' | 'lights' | 'camera' | 'recover' | 'exit'
+  | 'steerL' | 'steerR';
 
 /** Button centre measured from the bottom-right anchor, and diameter (px). */
 type Slot = [x: number, y: number, size: number];
 
+// Driving: a big gas pedal under the right thumb, brake / reverse beside it, drift (handbrake) above.
+const DRIVE: Partial<Record<ButtonId, Slot>> = {
+  gas: [70, 84, 100], rev: [186, 48, 74], brake: [188, 146, 60], boost: [262, 182, 56],
+  camera: [270, 42, 48], lights: [270, 108, 48], exit: [160, 236, 50],
+};
 const LAYOUTS: Record<string, Partial<Record<ButtonId, Slot>>> = {
-  foot: { jump: [62, 64, 78], crouch: [174, 44, 58] },
-  footArmed: { jump: [62, 64, 78], crouch: [174, 44, 58], draw: [154, 150, 56] },
+  foot: { jump: [66, 70, 82], crouch: [180, 46, 62] },
+  footArmed: { jump: [66, 70, 82], crouch: [180, 46, 62], draw: [160, 152, 56] },
   footDrawn: {
     fire: [66, 70, 88], aim: [176, 46, 60], reload: [160, 140, 52], jump: [62, 178, 54],
     crouch: [238, 34, 46], swap: [240, 108, 44], holster: [132, 222, 42],
   },
-  vehicle: { brake: [64, 70, 86], lights: [180, 48, 56], camera: [164, 152, 52], exit: [64, 182, 52] },
-  vehicleStuck: { brake: [64, 70, 86], lights: [180, 48, 56], camera: [164, 152, 52], exit: [250, 40, 48], recover: [64, 190, 64] },
+  vehicle: DRIVE,
+  vehicleStuck: { ...DRIVE, boost: undefined, recover: [262, 182, 60] },
 };
 
 const ICONS: Record<string, string> = {
@@ -50,6 +60,12 @@ const ICONS: Record<string, string> = {
   reload: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/>',
   swap: '<path d="M4 8h15l-4-4M20 16H5l4 4"/>',
   brake: '<circle cx="12" cy="12" r="6"/><path d="M5 5.5a9.5 9.5 0 0 0 0 13M19 5.5a9.5 9.5 0 0 1 0 13M12 9v3.5M12 15v.01"/>',
+  gas: '<path d="M12 4 5 12h4v7h6v-7h4z"/>',
+  rev: '<path d="M12 20 5 12h4V5h6v7h4z"/>',
+  boost: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  steerL: '<path d="M15 4 7 12l8 8"/>',
+  steerR: '<path d="M9 4l8 8-8 8"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   lights: '<path d="M11 5.5C6.5 5.5 4 8.5 4 12s2.5 6.5 7 6.5z"/><path d="M15 8h6M15 12h6M15 16h6"/>',
   camera: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   recover: '<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/>',
@@ -85,6 +101,10 @@ export class TouchControls {
   private lookId: number | null = null;
   private lookLast = { x: 0, y: 0 };
   private sprinting = false;
+  /** Thumb is up on the lock: letting go now keeps running. */
+  private lockArmed = false;
+  /** Auto-run: forward + sprint held with no thumb on the stick. */
+  private runLocked = false;
   private buttons = new Map<ButtonId, HTMLButtonElement>();
   /** Actions currently held by a touch button, released on hide. */
   private held = new Set<string>();
@@ -111,14 +131,17 @@ export class TouchControls {
     const moveZone = el('div', 'touch-move');
     this.stick = el('div', 'touch-stick');
     this.knob = el('div', 'touch-knob');
+    // Sprint lock above the stick: drag the knob up onto it and let go to keep running.
     const sprintTip = el('div', 'touch-sprint');
-    sprintTip.innerHTML = icon('jump');
+    sprintTip.innerHTML = `${icon('lock')}<span>Run</span>`;
     this.stick.append(this.knob, sprintTip);
     this.root.append(lookPad, moveZone, this.stick);
 
     moveZone.addEventListener('pointerdown', (e) => {
       if (this.stickId !== null) return;
       e.preventDefault();
+      // Touching the stick again ends auto-run (and takes over from there).
+      if (this.runLocked) this.resetStick();
       this.stickId = e.pointerId;
       moveZone.setPointerCapture(e.pointerId);
       // Float the stick to the thumb, kept fully on screen.
@@ -137,7 +160,8 @@ export class TouchControls {
     });
     const endStick = (e: PointerEvent) => {
       if (e.pointerId !== this.stickId) return;
-      this.resetStick();
+      if (this.lockArmed) this.lockRun();
+      else this.resetStick();
     };
     moveZone.addEventListener('pointerup', endStick);
     moveZone.addEventListener('pointercancel', endStick);
@@ -147,7 +171,9 @@ export class TouchControls {
 
     // Right-thumb cluster.
     const cluster = el('div', 'touch-cluster');
-    const make = (id: ButtonId, label: string, action: Action, kind: 'hold' | 'toggle' = 'hold') => {
+    // Steering arrows, bottom left (shown only while driving, in place of the stick).
+    const steer = el('div', 'touch-steer');
+    const make = (id: ButtonId, label: string, action: Action, kind: 'hold' | 'toggle' = 'hold', parent: HTMLElement = cluster) => {
       const b = el('button', `tc-btn tc-${id}`) as unknown as HTMLButtonElement;
       b.innerHTML = `${icon(id)}<span>${label}</span>`;
       b.addEventListener('pointerdown', (e) => {
@@ -170,7 +196,7 @@ export class TouchControls {
       b.addEventListener('pointerup', up);
       b.addEventListener('pointercancel', up);
       b.addEventListener('lostpointercapture', up);
-      cluster.appendChild(b);
+      parent.appendChild(b);
       this.buttons.set(id, b);
       return b;
     };
@@ -182,7 +208,12 @@ export class TouchControls {
     make('reload', 'Reload', 'reload');
     make('swap', 'Swap', 'nextWeapon');
     make('holster', 'Holster', 'holster');
-    make('brake', 'Brake', 'handbrake');
+    make('gas', 'Gas', 'forward');
+    make('rev', 'Brake', 'back');
+    make('boost', 'Boost', 'sprint');
+    make('brake', 'Drift', 'handbrake');
+    make('steerL', 'Left', 'left', 'hold', steer);
+    make('steerR', 'Right', 'right', 'hold', steer);
     make('lights', 'Lights', 'lights');
     make('camera', 'View', 'camera');
     make('recover', 'Recover', 'recover');
@@ -267,9 +298,9 @@ export class TouchControls {
     util('pause', 'Pause', () => onMenu('pause'));
 
     const rotate = el('div', 'touch-rotate');
-    rotate.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M20.5 9a8 8 0 0 1 0 6M3.5 15a8 8 0 0 1 0-6"/></svg><div>Rotate your phone</div><small>Hollow Creek plays in landscape</small>';
+    rotate.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M20.5 9a8 8 0 0 1 0 6M3.5 15a8 8 0 0 1 0-6"/></svg><div>Rotate your phone</div><small>The game plays in landscape</small>';
 
-    this.root.append(cluster, context, menus, rotate);
+    this.root.append(steer, cluster, context, menus, rotate);
     this.update({ mode: 'foot', prompt: null, radio: null, armed: false, drawn: false, needsRecovery: false, flashlight: false, lights: false });
   }
 
@@ -309,6 +340,14 @@ export class TouchControls {
     const len = Math.max(raw, 1e-6);
     this.input.touchMove.x = ((x - this.stickCenter.x) / len) * mag;
     this.input.touchMove.y = (-(y - this.stickCenter.y) / len) * mag;
+    // Thumb well above the stick (on the lock): letting go now locks running.
+    const up = -(y - this.stickCenter.y);
+    const armed = this.ctx?.mode !== 'vehicle' && up > max * 1.7 && Math.abs(x - this.stickCenter.x) < up * 0.6;
+    if (armed !== this.lockArmed) {
+      this.lockArmed = armed;
+      this.stick.classList.toggle('armed', armed);
+      if (armed) buzz(18);
+    }
     // Pushing the thumb past the ring sprints.
     const sprint = this.ctx?.mode !== 'vehicle' && raw > max * 1.2;
     if (sprint !== this.sprinting) {
@@ -323,13 +362,31 @@ export class TouchControls {
 
   private resetStick(): void {
     this.stickId = null;
+    this.lockArmed = false;
+    this.runLocked = false;
     this.input.touchMove.x = 0;
     this.input.touchMove.y = 0;
     this.knob.style.transform = 'translate(-50%, -50%)';
     this.stick.style.transform = '';
-    this.stick.classList.remove('active', 'sprint');
+    this.stick.classList.remove('active', 'sprint', 'armed', 'locked');
     if (this.sprinting) this.release('sprint');
     this.sprinting = false;
+  }
+
+  /** Auto-run: the thumb let go on the lock. Straight ahead at a sprint until the stick is touched again. */
+  private lockRun(): void {
+    this.stickId = null;
+    this.lockArmed = false;
+    this.runLocked = true;
+    this.input.touchMove.x = 0;
+    this.input.touchMove.y = 1;
+    if (!this.sprinting) this.press('sprint');
+    this.sprinting = true;
+    this.knob.style.transform = 'translate(-50%, calc(-50% - 56px))';
+    this.stick.style.transform = '';
+    this.stick.classList.remove('active', 'armed');
+    this.stick.classList.add('locked', 'sprint');
+    buzz(24);
   }
 
   private press(action: string): void {
@@ -362,7 +419,13 @@ export class TouchControls {
     if (key !== this.layoutKey) {
       this.layoutKey = key;
       const layout = LAYOUTS[key];
+      // Getting in ends auto-run; the stick gives way to the steering arrows.
+      if (!onFoot) this.resetStick();
       for (const [id, b] of this.buttons) {
+        if (id === 'steerL' || id === 'steerR') {
+          b.classList.toggle('shown', !onFoot);
+          continue;
+        }
         const slot = layout[id];
         b.classList.toggle('shown', !!slot);
         if (!slot) continue;
@@ -372,6 +435,9 @@ export class TouchControls {
       }
       this.root.dataset.mode = key;
     }
+    const boost = this.buttons.get('boost')!;
+    const showBoost = key === 'vehicle' && !!ctx.boost;
+    if (boost.classList.contains('shown') !== showBoost) boost.classList.toggle('shown', showBoost);
     this.buttons.get('lights')!.classList.toggle('on', ctx.lights);
     this.torchBtn.classList.toggle('on', ctx.flashlight);
     this.torchBtn.classList.toggle('hidden', !onFoot);
