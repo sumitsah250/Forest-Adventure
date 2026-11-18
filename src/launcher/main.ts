@@ -1,6 +1,7 @@
 // The site's front page and the installed app's home screen.
 //
-// In a browser it only offers to install the app; nothing heavy loads. Opened as the
+// In a browser it only offers to install the app (there is no play-in-browser option);
+// nothing heavy loads. Opened as the
 // installed app, it downloads the enabled games' files to the device once (with
 // progress), then offers Play; from then on the games load from the device.
 // Which games are offered is set in src/games.ts.
@@ -119,16 +120,13 @@ function webMode(): void {
       action.innerHTML = `<button class="lx-btn" type="button" disabled><span class="lx-spin"></span><span>Getting ready…</span></button><div class="lx-note">${sizeNote}</div>`;
       return;
     }
+    // Install only: no "play in the browser" fallback, so the game always runs from the
+    // device (downloaded once) instead of being served again on every visit.
     action.innerHTML = `
       <div class="lx-note lx-note--box">
         <b>Can’t install from this browser.</b> Open this page in <b>Chrome</b> or <b>Edge</b> (Android, Windows, Mac) or <b>Safari</b> (iPhone, iPad).
         Already installed? Open <b>${appName}</b> from your apps.
-      </div>
-      <button class="lx-link" type="button">Play in the browser instead</button>`;
-    (action.querySelector('.lx-link') as HTMLButtonElement).onclick = () => {
-      setPlayable(true);
-      root.querySelector('.lx__games')?.scrollIntoView({ behavior: 'smooth' });
-    };
+      </div>`;
   };
   onInstallChange(render);
   window.setTimeout(() => {
