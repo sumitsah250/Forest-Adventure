@@ -111,7 +111,9 @@ function iosSheet(): void {
       <b>Play it like an app</b>
       <p>In Safari, tap the <span class="pwa-share" aria-label="Share">
         <svg viewBox="0 0 16 16"><path d="M8 1.5v8M5 4.5l3-3 3 3M4 7H3v7.5h10V7h-1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Share button, then choose <b>Add to Home Screen</b>. It opens full screen and loads faster next time.</p>
+        Share button (on newer iPhones it's inside the <b>•••</b> menu), then choose <b>Add to Home Screen</b>.
+        It opens full screen and loads faster next time.</p>
+      <p>Opened this from Instagram, WhatsApp or another app? Open the page in <b>Safari</b> first.</p>
       <button type="button">Got it</button>
     </div>`;
   s.addEventListener('click', (e) => {

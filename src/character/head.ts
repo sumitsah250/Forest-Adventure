@@ -7,6 +7,7 @@
 // Head space: centre at HEAD_C (character space), +Z is the face, +X the head's left.
 
 import * as THREE from 'three';
+import { shrinkTexture } from '../render/textures.ts';
 
 export const HEAD_C = new THREE.Vector3(0, 1.69, 0.0);
 
@@ -290,7 +291,8 @@ export function faceTexture(f: FacePaint): THREE.Texture {
   // Hairline: hair colour on the scalp so the hair cap never shows skin through gaps.
   ctx.fillStyle = css(new THREE.Color(f.hair).multiplyScalar(0.8), 1);
   ctx.fillRect(0, 0, W, H * 0.14);
-  const t = new THREE.CanvasTexture(c);
+  // Painted at full size (the strokes are in pixels), then shrunk on phones.
+  const t = shrinkTexture(new THREE.CanvasTexture(c));
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   faceCache.set(key, t);

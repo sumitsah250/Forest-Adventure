@@ -9,7 +9,7 @@ import { SITES } from '../world/layout.ts';
 import { PhysicsWorld, initRapier } from '../physics/physics.ts';
 import { Atmosphere } from '../render/atmosphere.ts';
 import { TerrainRenderer, makeCanopyTexture } from '../render/terrainMesh.ts';
-import { loadPbr, setMaxAnisotropy } from '../render/textures.ts';
+import { loadPbr, setMaxAnisotropy, setTextureCap } from '../render/textures.ts';
 import { Player } from '../player/player.ts';
 import { loadPlayerModel } from '../character/playerModel.ts';
 import { setCharacterDetail } from '../character/humanoid.ts';
@@ -92,6 +92,8 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     setMaxAnisotropy(Math.min(8, this.renderer.capabilities.getMaxAnisotropy()));
+    // Low (phones start there): textures at most textureSize, so the tab stays inside a phone's memory.
+    setTextureCap(this.preset.textureSize < 1024 ? this.preset.textureSize : 0);
     this.camera = new THREE.PerspectiveCamera(this.settings.fov, 1, 0.08, 1400);
     this.camera.rotation.order = 'YXZ';
     this.input = new Input(canvas);

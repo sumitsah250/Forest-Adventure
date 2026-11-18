@@ -112,6 +112,29 @@ html, body { margin: 0; min-height: 100%; background: #0b1424; color: var(--lx-i
 .lx-dl__bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--lx-gold-d), var(--lx-gold)); transform-origin: left; transform: scaleX(0); transition: transform 0.35s ease; }
 .lx-dl__meta { font-size: 12.5px; color: var(--lx-dim); font-variant-numeric: tabular-nums; }
 
+/* iPhone / iPad "Add to Home Screen" steps (built by src/pwa.ts iosSheet). The game's copy of these styles lives in
+   src/style.css, which this page doesn't load, so without them the sheet landed unstyled below the footer and the
+   install button looked dead. */
+.pwa-sheet {
+  position: fixed; inset: 0; z-index: 80; display: grid; align-items: end; justify-items: center;
+  padding: 16px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(0, 0, 0, 0.55); animation: lx-fade 0.2s ease both;
+}
+.pwa-sheet__box {
+  width: min(440px, 100%); padding: 20px 22px; border-radius: 16px; background: #13203a; border: 1px solid var(--lx-faint);
+  border-top: 3px solid var(--lx-gold); color: var(--lx-ink); font-size: 15px; line-height: 1.5;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); animation: lx-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.pwa-sheet__box > b { font-size: 17px; }
+.pwa-sheet__box p { margin: 8px 0 16px; color: var(--lx-dim); }
+.pwa-sheet__box p b { color: var(--lx-ink); }
+.pwa-share { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgba(255, 255, 255, 0.14); vertical-align: -6px; }
+.pwa-share svg { width: 16px; height: 16px; }
+.pwa-sheet__box button {
+  width: 100%; min-height: 48px; border: 0; border-radius: 10px; background: var(--lx-gold); color: var(--lx-gold-ink);
+  font: 700 16px var(--lx-body); cursor: pointer; box-shadow: 0 2px 0 var(--lx-gold-d);
+}
+
 .lx__foot { max-width: 640px; text-align: center; font-size: 11px; line-height: 1.6; color: rgba(255, 255, 255, 0.5); }
 
 /* Wider screens: the download card puts the overview picture beside the install panel, so the title and the
@@ -135,8 +158,10 @@ html, body { margin: 0; min-height: 100%; background: #0b1424; color: var(--lx-i
 }
 
 @keyframes lx-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lx-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes lx-spin { to { transform: rotate(360deg); } }
 @keyframes lx-drift { from { transform: scale(1.04) translate3d(-1.2%, 0, 0); } to { transform: scale(1.1) translate3d(1.2%, -1%, 0); } }
 @media (prefers-reduced-motion: reduce) {
+  .pwa-sheet, .pwa-sheet__box,
   .lx *, .lx *::before, .lx *::after { animation: none !important; transition-duration: 0.01s !important; }
 }

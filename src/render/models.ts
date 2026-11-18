@@ -2,24 +2,9 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { assetUrl } from './textures.ts';
+import { assetUrl, shrinkTexture } from './textures.ts';
 
 const loader = new GLTFLoader();
-const shrunk = new WeakSet<object>();
-
-/** Props are small on screen: keep their textures at most `max` pixels to save GPU memory. */
-function downscale(t: THREE.Texture, max: number): void {
-  const img = t.image as HTMLImageElement | ImageBitmap | HTMLCanvasElement | undefined;
-  if (!img || shrunk.has(img) || !('width' in img) || img.width <= max) return;
-  const c = document.createElement('canvas');
-  const s = max / Math.max(img.width, img.height);
-  c.width = Math.round(img.width * s);
-  c.height = Math.round(img.height * s);
-  c.getContext('2d')!.drawImage(img as CanvasImageSource, 0, 0, c.width, c.height);
-  shrunk.add(c);
-  t.image = c;
-  t.needsUpdate = true;
-}
 const cache = new Map<string, Promise<THREE.Group>>();
 
 export function loadModel(slug: string): Promise<THREE.Group> {
@@ -46,7 +31,9 @@ export function loadModel(slug: string): Promise<THREE.Group> {
             }
             for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const) {
               const t = s[key];
-              if (t) downscale(t, 512);
+              // Props are small on screen: at most 512 px (less on phones, see setTextureCap).
+              if (t) shrinkTexture(t, 512);
+              if (t) shrinkTexture(t);
             }
             if (s.map) s.map.anisotropy = 4;
           }

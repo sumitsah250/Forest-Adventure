@@ -10,7 +10,7 @@ import { PRESETS, loadSettings, qualityOverride } from '../core/settings.ts';
 import { installGrade } from '../render/grade.ts';
 import { GROUP, PhysicsWorld, groups, initRapier } from '../physics/physics.ts';
 import { Atmosphere, type AtmosphereState } from '../render/atmosphere.ts';
-import { loadPbr, setMaxAnisotropy } from '../render/textures.ts';
+import { loadPbr, setMaxAnisotropy, setTextureCap } from '../render/textures.ts';
 import { buildFoliageAtlas } from '../render/foliageAtlas.ts';
 import { windUniforms } from '../render/foliageMaterial.ts';
 import { Player } from '../player/player.ts';
@@ -98,6 +98,8 @@ async function boot(): Promise<void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+  // Low (phones start there): textures at most textureSize, so the tab stays inside a phone's memory.
+  setTextureCap(settings.quality === 'low' ? preset.textureSize : 0);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.08, 1600);
   camera.rotation.order = 'YXZ';

@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { assetUrl } from '../render/textures.ts';
+import { assetUrl, shrinkTexture } from '../render/textures.ts';
 import { BONE_NAMES, BONE_PARENT, createHumanoid, type BoneName, type Humanoid, type Outfit } from './humanoid.ts';
 
 const MODEL_URL = 'models/player/sumit_character.glb';
@@ -169,6 +169,10 @@ function buildTemplate(scene: THREE.Object3D, clips: THREE.AnimationClip[]): Tem
   for (const name of BONE_NAMES) unbind[name] = r[name].clone().multiply(restQ[name]).invert();
   for (const mat of materials) {
     const std = mat as THREE.MeshStandardMaterial;
+    for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const) {
+      const t = std[key];
+      if (t) shrinkTexture(t);
+    }
     if (std.map) std.map.anisotropy = 8;
   }
   return { geometry, materials, joints, order, boneInverses, armature, clips, unbind };

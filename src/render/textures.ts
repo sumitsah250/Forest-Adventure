@@ -37,8 +37,36 @@ export function setMaxAnisotropy(value: number): void {
   maxAniso = value;
 }
 
+/**
+ * Largest texture side allowed on this device (0 = no limit). The Low preset (which phones start on) sets it so
+ * the GPU and the browser tab stay inside a phone's memory: every 1024² texture with mipmaps is ~5.6 MB, and a
+ * phone browser kills the tab (Chrome's "Aw, Snap!" sad face, Safari's reload) well before a desktop would.
+ */
+let textureCap = 0;
+export function setTextureCap(px: number): void {
+  textureCap = px;
+}
+
+const shrunk = new WeakSet<object>();
+/** Redraws a texture's image smaller so neither side exceeds `max` (default: the device cap). Call before first use. */
+export function shrinkTexture<T extends THREE.Texture>(t: T, max = textureCap): T {
+  const img = t.image as HTMLImageElement | ImageBitmap | HTMLCanvasElement | undefined;
+  if (!max || !img || shrunk.has(img) || !('width' in img) || Math.max(img.width, img.height) <= max) return t;
+  const c = document.createElement('canvas');
+  const s = max / Math.max(img.width, img.height);
+  c.width = Math.max(1, Math.round(img.width * s));
+  c.height = Math.max(1, Math.round(img.height * s));
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img as CanvasImageSource, 0, 0, c.width, c.height);
+  shrunk.add(c);
+  t.image = c;
+  t.needsUpdate = true;
+  return t;
+}
+
 function imageTexture(img: HTMLImageElement, srgb: boolean, repeat: number): THREE.Texture {
-  const tex = new THREE.Texture(img);
+  const tex = shrinkTexture(new THREE.Texture(img));
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
