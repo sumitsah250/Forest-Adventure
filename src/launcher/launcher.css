@@ -1,167 +1,308 @@
 /* Sumix Games launcher: the install page and the installed app's home screen.
-   Styled after Campus Quest's title screen (src/campus/campus.css .cq-title): the campus from the air behind a dark
-   gradient, a centred "presents / NAME / place" title, gold primary buttons and glass panels. */
+   It opens like a film on Campus Quest's in-game trailer: black letterbox bars carry the studio credit, the story
+   clock and the captions. Colours come from the game: its night sky, the IOE gate sign (maroon board, gold
+   lettering), MITRA's alarm red and the dawn light. Type: Teko (condensed, with Devanagari for the gate's line)
+   for display, Mukta for reading. Both are served from ./fonts so the installed app works offline. */
+
+@font-face {
+  font-family: 'Teko';
+  src: url('./fonts/teko-latin.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF;
+}
+@font-face {
+  font-family: 'Teko';
+  src: url('./fonts/teko-devanagari.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+  unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF;
+}
+@font-face {
+  font-family: 'Mukta';
+  src: url('./fonts/mukta-400-latin.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Mukta';
+  src: url('./fonts/mukta-600-latin.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
 
 :root {
-  --lx-ink: #fff;
-  --lx-dim: rgba(255, 255, 255, 0.78);
-  --lx-faint: rgba(255, 255, 255, 0.16);
-  --lx-gold: #f2d27a;
-  --lx-gold-hover: #ffe199;
-  --lx-gold-d: #c9a03a;
-  --lx-gold-ink: #1c2230;
-  --lx-blue: #1d3f78;
-  --lx-glass: rgba(14, 22, 38, 0.72);
-  --lx-body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Roboto, Arial, sans-serif;
+  /* The game's night sky (src/campus/main.ts SKIES.night) and a step up from it. */
+  --night: #05080f;
+  --night-up: #0d1424;
+  /* The IOE gate sign (src/campus/world.ts): maroon board, gold lettering. */
+  --maroon: #7a1f1f;
+  --gold: #f2d27a;
+  --gold-hover: #ffe199;
+  --gold-d: #c9a03a;
+  --ink: #1c2230;
+  /* MITRA, the campus AI. */
+  --alarm: #ff5a66;
+  /* Moonlight and first light, for clocks under those skies. */
+  --moon: #b4c4ea;
+  --dawn: #ffc28a;
+  --text: #fff;
+  --dim: rgba(255, 255, 255, 0.78);
+  --faint: rgba(255, 255, 255, 0.16);
+  --display: 'Teko', 'Arial Narrow', 'Roboto Condensed', sans-serif;
+  --body: 'Mukta', 'Segoe UI', system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --gut: max(16px, env(safe-area-inset-left), env(safe-area-inset-right));
+  /* Letterbox bars. */
+  --bar: clamp(46px, 9vh, 78px);
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: #0b1424; color: var(--lx-ink); font-family: var(--lx-body); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--night); color: var(--text); font-family: var(--body); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+.lx { min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
+:where(.lx) p { margin: 0; }
+.lx :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
-.lx {
-  position: relative; min-height: 100vh; min-height: 100dvh; overflow: hidden;
-  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; align-content: center; gap: 26px;
-  padding: max(28px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-  isolation: isolate;
+/* ---------------------------------------------------------------- the trailer */
+.lx-hero {
+  --sky: var(--gold);
+  position: relative; isolation: isolate; overflow: hidden;
+  min-height: 100vh; min-height: 100svh;
+  display: grid; grid-template-rows: var(--bar) minmax(0, 1fr) var(--bar);
+  background: #000;
 }
+/* The clock takes the colour of the sky it is under. */
+.lx-hero[data-scene="storm"], .lx-hero[data-scene="chase"] { --sky: var(--moon); }
+.lx-hero[data-scene="sunrise"] { --sky: var(--dawn); }
 
-/* The campus behind everything, drifting slowly like the title-screen camera. */
-.lx__sky {
-  position: fixed; inset: 0; z-index: -1; overflow: hidden;
-  background: radial-gradient(60vmax 40vmax at 50% 110%, rgba(58, 106, 174, 0.5), transparent 70%), linear-gradient(180deg, #13284d, #0b1424);
-}
-.lx__sky img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 62%; animation: lx-drift 48s ease-in-out infinite alternate; }
-.lx__sky::after {
+.lx-film { position: absolute; inset: var(--bar) 0; z-index: -1; overflow: hidden; background: #000; }
+.lx-film video, .lx-film img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lx-film__poster { transition: opacity 0.7s ease; }
+.lx-film.is-playing .lx-film__poster { opacity: 0; }
+.lx-film__slides { display: none; }
+.lx-film.is-slides .lx-film__slides { display: block; }
+.lx-film.is-slides .lx-film__poster { display: none; }
+.lx-film__slides img { opacity: 0; transition: opacity 0.9s ease; }
+.lx-film__slides img.is-on { opacity: 1; animation: lx-drift 6s linear both; }
+/* Reading light for the title and a little grain, over the picture. */
+.lx-film::after {
   content: ''; position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(10, 20, 40, 0.42) 0%, rgba(10, 20, 40, 0.5) 40%, rgba(8, 14, 28, 0.9) 100%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.38) 34%, transparent 62%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.62) 0%, transparent 46%);
+  background-blend-mode: overlay, normal, normal;
+  opacity: 0.95;
 }
 
-/* ---------------------------------------------------------------- title */
-.lx__hero {
-  width: min(640px, 100%); display: grid; gap: 14px; justify-items: center; text-align: center;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
-  animation: lx-in 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-.lx__studio { font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255, 255, 255, 0.75); }
-.lx__name { margin: 0; font-size: clamp(38px, 8vw, 72px); font-weight: 800; letter-spacing: 0.08em; line-height: 1; text-transform: uppercase; overflow-wrap: anywhere; }
-.lx__place { font-size: 16px; font-weight: 600; color: var(--lx-gold); }
-.lx__intro { margin: 0; max-width: 520px; font-size: 16px; line-height: 1.5; color: rgba(255, 255, 255, 0.88); }
+/* The bars part on load: two black halves slide away to the letterbox. */
+.lx-shutter { position: absolute; left: 0; right: 0; z-index: 5; height: 50.5%; background: #000; pointer-events: none; }
+.lx-shutter--top { top: 0; animation: lx-up 1.5s 0.3s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
+.lx-shutter--bottom { bottom: 0; animation: lx-down 1.5s 0.3s cubic-bezier(0.7, 0, 0.2, 1) forwards; }
 
-/* ---------------------------------------------------------------- download card (one game) / game cards */
-.lx__games { width: min(760px, 100%); display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
-.lx-card {
-  display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; overflow: hidden;
-  border-radius: 16px; background: var(--lx-glass); border: 1px solid var(--lx-faint); border-top: 3px solid var(--lx-gold);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  animation: lx-in 0.8s 0.08s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.lx-bar {
+  position: relative; z-index: 3; min-width: 0; background: #000;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--gut);
 }
-.lx-card:nth-child(2) { animation-delay: 0.16s; }
-.lx-card__shot { display: block; width: 100%; height: auto; aspect-ratio: 16 / 8; object-fit: cover; object-position: 50% 62%; background: #13284d; }
-.lx-card__row { display: flex; align-items: center; gap: 14px; padding: 16px 18px 0; }
-.lx-card__icon { width: 56px; height: 56px; flex: none; border-radius: 14px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); }
-.lx-card__tag { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--lx-gold); font-weight: 700; }
-.lx-card__name { margin: 3px 0 0; font-size: 22px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.1; }
-.lx-card__blurb { margin: 10px 18px 0; font-size: 14px; line-height: 1.45; color: var(--lx-dim); }
-.lx-card__play {
-  margin: 14px 18px 18px; display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 10px;
-  background: var(--lx-gold); color: var(--lx-gold-ink); font-weight: 700; font-size: 16px; text-decoration: none;
-  box-shadow: 0 2px 0 var(--lx-gold-d); transition: background 0.15s, transform 0.1s;
+.lx-bar--top { padding-top: env(safe-area-inset-top); box-sizing: content-box; }
+.lx-studio { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lx-clock {
+  display: flex; align-items: baseline; gap: 0.18em; flex: none;
+  font: 500 calc(var(--bar) * 0.66) / 1 var(--display); font-variant-numeric: tabular-nums; color: var(--sky);
+  transform: translateY(0.08em); transition: color 1s ease;
 }
-.lx-card__play:active { transform: translateY(1px); }
-@media (hover: hover) { .lx-card__play:hover { background: var(--lx-gold-hover); } }
-.lx-card__play[aria-disabled="true"] { background: var(--lx-faint); color: var(--lx-dim); box-shadow: none; pointer-events: none; }
-/* In the browser the cards only show what's inside; playing happens in the installed app. */
-.lx--web .lx-card__play[aria-disabled="true"] { display: none; }
+.lx-clock__ap { font-size: 0.46em; letter-spacing: 0.04em; }
+.lx-bar--bottom { justify-content: center; padding-bottom: env(safe-area-inset-bottom); box-sizing: content-box; }
+.lx-caption {
+  max-width: min(46em, calc(100% - 60px)); text-align: center;
+  font-size: clamp(14px, 1.5vw, 18px); line-height: 1.25; color: #fff;
+  opacity: 0; transition: opacity 0.35s ease;
+}
+.lx-caption.is-on { opacity: 1; }
+.lx-toggle {
+  position: absolute; right: var(--gut); top: 50%; transform: translateY(-50%);
+  width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border-radius: 50%;
+  border: 1px solid var(--faint); background: transparent; color: rgba(255, 255, 255, 0.75); cursor: pointer;
+}
+.lx-toggle svg { width: 13px; height: 13px; }
+@media (hover: hover) { .lx-toggle:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); } }
 
-/* Install / download state: inside the card for one game, its own panel for several. */
-.lx-get { padding: 14px 18px 0; }
-.lx-get--solo { width: min(760px, 100%); padding: 18px; border-radius: 16px; background: var(--lx-glass); border: 1px solid var(--lx-faint); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.lx__title { margin: 0; font-size: 16px; font-weight: 700; }
-.lx__lede { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--lx-dim); }
-.lx__action { margin-top: 14px; display: grid; gap: 10px; }
-.lx--web .lx-card .lx__action { margin-bottom: 18px; }
+.lx-hero__body {
+  grid-row: 2; align-self: end; z-index: 2; width: min(640px, 100%);
+  padding: 32px var(--gut) clamp(24px, 6vh, 64px);
+  animation: lx-rise 0.9s 1.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.lx-name {
+  margin: 0; font: 600 clamp(66px, 10.5vw, 160px) / 0.76 var(--display); letter-spacing: 0.005em; text-transform: uppercase;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.45);
+}
+/* The story's name sits under the title as it does on the game's title screen. */
+.lx-story {
+  margin-top: 0.1em; font: 500 clamp(21px, 2.3vw, 30px) / 1 var(--display); letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--alarm); text-shadow: 0 0 18px rgba(255, 42, 58, 0.5);
+}
+.lx-place { margin-top: 14px; font-size: 15px; font-weight: 600; color: var(--gold); }
+.lx-intro { margin-top: 10px; max-width: 34em; font-size: clamp(16px, 1.25vw, 18px); line-height: 1.55; color: rgba(255, 255, 255, 0.88); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
 
+/* ---------------------------------------------------------------- install / download */
+.lx-get { margin-top: 22px; width: min(430px, 100%); display: grid; gap: 12px; }
+.lx-get__title { margin: 0; font: 500 30px / 1 var(--display); }
+.lx-get__title:empty, .lx-get__lede:empty { display: none; }
+.lx-get__lede { font-size: 15px; line-height: 1.5; color: var(--dim); }
+.lx-action { display: grid; gap: 10px; }
 .lx-btn {
-  appearance: none; border: 1px solid var(--lx-gold); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
-  min-height: 50px; padding: 0 22px; border-radius: 10px;
-  background: var(--lx-gold); color: var(--lx-gold-ink); font: 700 16px var(--lx-body);
-  box-shadow: 0 2px 0 var(--lx-gold-d), 0 10px 28px rgba(242, 210, 122, 0.22);
+  appearance: none; border: 0; cursor: pointer; width: 100%; min-height: 54px; padding: 0 24px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--gold); color: var(--ink); font: 600 17px var(--body);
+  box-shadow: 0 2px 0 var(--gold-d), 0 12px 32px rgba(242, 210, 122, 0.22);
   transition: background 0.15s, transform 0.1s, opacity 0.2s;
 }
 .lx-btn svg { width: 19px; height: 19px; }
 .lx-btn:active { transform: translateY(1px); }
-.lx-btn:disabled { cursor: default; opacity: 0.55; box-shadow: none; }
-@media (hover: hover) { .lx-btn:not(:disabled):hover { background: var(--lx-gold-hover); } }
+.lx-btn:disabled { cursor: default; opacity: 0.6; box-shadow: none; }
+@media (hover: hover) { .lx-btn:not(:disabled):hover { background: var(--gold-hover); } }
 .lx-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: lx-spin 0.8s linear infinite; }
+.lx-play {
+  display: flex; align-items: center; justify-content: center; min-height: 54px; border-radius: 6px;
+  background: var(--gold); color: var(--ink); font: 600 17px var(--body); text-decoration: none;
+  box-shadow: 0 2px 0 var(--gold-d); transition: background 0.15s, transform 0.1s;
+}
+.lx-play:active { transform: translateY(1px); }
+@media (hover: hover) { .lx-play:hover { background: var(--gold-hover); } }
+.lx-play[aria-disabled="true"] { background: var(--faint); color: var(--dim); box-shadow: none; pointer-events: none; }
+/* In the browser there is only Install; playing happens in the installed app. */
+.lx--web .lx-play[aria-disabled="true"] { display: none; }
 
-.lx-note { font-size: 13px; color: var(--lx-dim); min-height: 1em; }
-.lx-note--box { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--lx-faint); background: rgba(0, 0, 0, 0.25); line-height: 1.5; }
-.lx-note b { color: var(--lx-ink); }
-.lx-link { appearance: none; border: 0; background: none; padding: 0; justify-self: start; color: var(--lx-gold); font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.lx-done { padding: 12px 14px; border-radius: 10px; background: rgba(79, 191, 106, 0.14); border: 1px solid rgba(110, 210, 130, 0.32); line-height: 1.5; color: var(--lx-dim); }
-.lx-done b { color: var(--lx-ink); }
+.lx-note { font-size: 13.5px; color: var(--dim); }
+.lx-note--box { padding: 12px 14px; border-radius: 6px; border: 1px solid var(--faint); background: rgba(0, 0, 0, 0.45); line-height: 1.5; }
+.lx-note b { color: var(--text); font-weight: 600; }
+.lx-link { appearance: none; border: 0; background: none; padding: 0; color: var(--gold); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.lx-done { padding: 12px 14px; border-radius: 6px; background: rgba(40, 120, 60, 0.32); border: 1px solid rgba(110, 210, 130, 0.38); line-height: 1.5; color: var(--dim); }
+.lx-done b { color: var(--text); font-weight: 600; }
 .lx-done > b:first-child { color: #9fe09f; margin-right: 6px; }
 
-.lx-dl { padding: 14px 16px; border-radius: 12px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--lx-faint); }
+.lx-dl { padding: 14px 16px; border-radius: 6px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--faint); }
 .lx-dl__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.lx-dl__state { font-size: 14px; }
-.lx-dl__pct { font-weight: 800; font-size: 24px; font-variant-numeric: tabular-nums; color: var(--lx-gold); }
-.lx-dl__bar { height: 6px; margin: 10px 0 8px; border-radius: 99px; background: var(--lx-faint); overflow: hidden; }
-.lx-dl__bar span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--lx-gold-d), var(--lx-gold)); transform-origin: left; transform: scaleX(0); transition: transform 0.35s ease; }
-.lx-dl__meta { font-size: 12.5px; color: var(--lx-dim); font-variant-numeric: tabular-nums; }
+.lx-dl__state { font-size: 15px; font-weight: 600; }
+.lx-dl__pct { font: 500 30px / 1 var(--display); font-variant-numeric: tabular-nums; color: var(--gold); }
+.lx-dl__bar { height: 4px; margin: 10px 0 8px; border-radius: 99px; background: var(--faint); overflow: hidden; }
+.lx-dl__bar span { display: block; height: 100%; background: var(--gold); transform-origin: left; transform: scaleX(0); transition: transform 0.35s ease; }
+.lx-dl__meta { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- the night, mission by mission */
+.lx-night { padding: clamp(64px, 10vw, 128px) var(--gut); background: var(--night); }
+.lx-night__head, .lx-beats { max-width: 1120px; margin-inline: auto; }
+.lx-night__head { margin-bottom: clamp(40px, 6vw, 72px); }
+.lx-night__head h2 { margin: 0; font: 600 clamp(46px, 6vw, 78px) / 0.85 var(--display); }
+.lx-night__head p { margin-top: 14px; max-width: 36em; font-size: 18px; line-height: 1.55; color: var(--dim); }
+
+.lx-beats { list-style: none; padding: 0; display: grid; gap: clamp(36px, 5vw, 64px); }
+.lx-beat { --sky: var(--gold); display: grid; grid-template-columns: 8.5rem minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 44px); align-items: center; }
+.lx-beat[data-sky="night"] { --sky: var(--moon); }
+.lx-beat[data-sky="dawn"] { --sky: var(--dawn); }
+/* The clock column is the timeline: a line through every mission, a dot at each. */
+.lx-beat__clock {
+  position: relative; align-self: stretch; display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 22px; border-right: 1px solid var(--faint);
+  font: 500 clamp(34px, 3.4vw, 46px) / 1 var(--display); color: var(--sky); white-space: nowrap;
+}
+.lx-beat__clock::before { content: ''; position: absolute; right: -5px; top: 50%; width: 9px; height: 9px; margin-top: -4.5px; border-radius: 50%; background: var(--sky); box-shadow: 0 0 12px var(--sky); }
+.lx-beat:not(:last-child) .lx-beat__clock::after { content: ''; position: absolute; right: -1px; top: 100%; width: 1px; height: clamp(36px, 5vw, 64px); background: var(--faint); }
+.lx-beat__still { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: var(--night-up); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5); }
+.lx-beat__title { margin: 0; font: 600 clamp(30px, 3vw, 42px) / 0.9 var(--display); }
+.lx-beat__place { margin-top: 6px; font-size: 13.5px; font-weight: 600; color: var(--sky); }
+.lx-beat__text > p:last-child { margin-top: 10px; font-size: 17px; line-height: 1.55; color: var(--dim); max-width: 26em; }
+
+/* ---------------------------------------------------------------- at the gate: install again */
+.lx-gate { position: relative; isolation: isolate; overflow: hidden; display: grid; place-items: center; padding: clamp(72px, 12vw, 150px) var(--gut); background: var(--night); }
+.lx-gate__bg { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+.lx-gate::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, var(--night) 0%, rgba(5, 8, 15, 0.35) 34%, rgba(5, 8, 15, 0.6) 100%); }
+/* Built like the gate's signboard: a maroon board with a gold line around it. */
+.lx-sign {
+  width: min(760px, 100%); padding: clamp(30px, 4.5vw, 48px) clamp(22px, 5vw, 56px); border-radius: 3px; text-align: center;
+  background: var(--maroon);
+  box-shadow: inset 0 0 0 8px var(--maroon), inset 0 0 0 10px var(--gold), 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.lx-sign__deva { font: 500 clamp(17px, 2.1vw, 24px) / 1.3 var(--display); color: var(--gold); }
+.lx-sign__name { margin: 12px 0 0; font: 600 clamp(52px, 7.5vw, 92px) / 0.8 var(--display); text-transform: uppercase; }
+.lx-sign__lede { margin: 14px auto 0; max-width: 30em; font-size: 16.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.88); }
+.lx-sign .lx-action { width: min(400px, 100%); margin: 24px auto 0; }
+.lx-sign .lx-note { color: rgba(255, 255, 255, 0.8); }
+
+/* ---------------------------------------------------------------- several games */
+.lx-games { max-width: 900px; margin: 0 auto; padding: 48px var(--gut) 0; display: grid; gap: 12px; }
+.lx-card { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 16px; border-radius: 8px; background: var(--night-up); border: 1px solid var(--faint); }
+.lx-card__icon { border-radius: 12px; }
+.lx-card__name { margin: 0; font: 600 28px / 1 var(--display); }
+.lx-card__blurb { margin-top: 4px; font-size: 14.5px; line-height: 1.45; color: var(--dim); }
+.lx-card .lx-play { min-width: 110px; padding: 0 18px; }
+
+.lx-foot { padding: 28px var(--gut) max(32px, env(safe-area-inset-bottom)); text-align: center; font-size: 12.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.5); background: var(--night); }
+.lx-foot p + p { margin-top: 2px; }
 
 /* iPhone / iPad "Add to Home Screen" steps (built by src/pwa.ts iosSheet). The game's copy of these styles lives in
-   src/style.css, which this page doesn't load, so without them the sheet landed unstyled below the footer and the
-   install button looked dead. */
+   src/style.css, which this page doesn't load. */
 .pwa-sheet {
   position: fixed; inset: 0; z-index: 80; display: grid; align-items: end; justify-items: center;
   padding: 16px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-  background: rgba(0, 0, 0, 0.55); animation: lx-fade 0.2s ease both;
+  background: rgba(0, 0, 0, 0.6); animation: lx-fade 0.2s ease both;
 }
 .pwa-sheet__box {
-  width: min(440px, 100%); padding: 20px 22px; border-radius: 16px; background: #13203a; border: 1px solid var(--lx-faint);
-  border-top: 3px solid var(--lx-gold); color: var(--lx-ink); font-size: 15px; line-height: 1.5;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); animation: lx-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  width: min(440px, 100%); padding: 20px 22px; border-radius: 10px; background: var(--night-up); border: 1px solid var(--faint);
+  border-top: 3px solid var(--gold); color: var(--text); font-size: 15px; line-height: 1.5;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); animation: lx-rise 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 .pwa-sheet__box > b { font-size: 17px; }
-.pwa-sheet__box p { margin: 8px 0 16px; color: var(--lx-dim); }
-.pwa-sheet__box p b { color: var(--lx-ink); }
+.pwa-sheet__box p { margin: 8px 0 16px; color: var(--dim); }
+.pwa-sheet__box p b { color: var(--text); }
 .pwa-share { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgba(255, 255, 255, 0.14); vertical-align: -6px; }
 .pwa-share svg { width: 16px; height: 16px; }
 .pwa-sheet__box button {
-  width: 100%; min-height: 48px; border: 0; border-radius: 10px; background: var(--lx-gold); color: var(--lx-gold-ink);
-  font: 700 16px var(--lx-body); cursor: pointer; box-shadow: 0 2px 0 var(--lx-gold-d);
+  width: 100%; min-height: 48px; border: 0; border-radius: 6px; background: var(--gold); color: var(--ink);
+  font: 600 16px var(--body); cursor: pointer; box-shadow: 0 2px 0 var(--gold-d);
 }
 
-.lx__foot { max-width: 640px; text-align: center; font-size: 11px; line-height: 1.6; color: rgba(255, 255, 255, 0.5); }
-
-/* Wider screens: the download card puts the overview picture beside the install panel, so the title and the
-   install button both fit on the first screen. */
-@media (min-width: 720px) {
-  .lx-card:has(.lx-card__shot) { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; }
-  .lx-card:has(.lx-card__shot) .lx-card__shot { grid-row: 1 / -1; height: 100%; min-height: 250px; aspect-ratio: auto; }
-  .lx-card:has(.lx-card__shot) > :not(.lx-card__shot) { grid-column: 2; }
+/* ---------------------------------------------------------------- smaller screens */
+@media (max-width: 760px) {
+  .lx-film::after {
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"),
+      linear-gradient(0deg, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.5) 45%, transparent 75%);
+    background-blend-mode: overlay, normal;
+  }
+  .lx-studio { font-size: 12px; }
+  /* The timeline runs down the left edge; each mission stacks beside it. */
+  .lx-beat { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-left: 22px; border-left: 1px solid var(--faint); }
+  .lx-beats { gap: 0; }
+  .lx-beat:not(:last-child) { padding-bottom: 44px; }
+  .lx-beat__clock { justify-content: flex-start; padding-right: 0; border-right: 0; font-size: 36px; }
+  .lx-beat__clock::before { right: auto; left: -27px; }
+  .lx-beat:not(:last-child) .lx-beat__clock::after { display: none; }
 }
 
-/* Landscape phones: a tighter title so the download card stays on screen. */
+/* Landscape phones (the installed app runs landscape): slimmer bars and title so the panel stays on screen. */
 @media (orientation: landscape) and (max-height: 520px) {
-  .lx { gap: 14px; align-content: start; padding-top: max(16px, env(safe-area-inset-top)); }
-  .lx__hero { gap: 8px; }
-  .lx__name { font-size: clamp(30px, 9vh, 46px); }
-  .lx__intro { display: none; }
-  .lx-card:has(.lx-card__shot) .lx-card__shot { min-height: 0; }
-  .lx-card__row { padding-top: 12px; }
-  .lx-card__icon { width: 44px; height: 44px; border-radius: 11px; }
-  .lx-card__name { font-size: 19px; }
+  .lx-hero { --bar: 40px; }
+  .lx-hero__body { padding-top: 12px; padding-bottom: 16px; width: min(560px, 100%); }
+  .lx-name { font-size: clamp(44px, 15vh, 70px); }
+  .lx-story { font-size: 18px; }
+  .lx-place { margin-top: 8px; font-size: 13px; }
+  .lx-intro { display: none; }
+  .lx-get { margin-top: 12px; gap: 8px; }
+  .lx-get__title { font-size: 24px; }
+  .lx-get__lede { font-size: 13.5px; }
+  .lx-btn, .lx-play { min-height: 46px; }
+  .lx-caption { font-size: 13px; }
 }
 
-@keyframes lx-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes lx-up { to { transform: translateY(-100%); } }
+@keyframes lx-down { to { transform: translateY(100%); } }
+@keyframes lx-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes lx-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes lx-spin { to { transform: rotate(360deg); } }
-@keyframes lx-drift { from { transform: scale(1.04) translate3d(-1.2%, 0, 0); } to { transform: scale(1.1) translate3d(1.2%, -1%, 0); } }
+@keyframes lx-drift { from { transform: scale(1.03); } to { transform: scale(1.1); } }
 @media (prefers-reduced-motion: reduce) {
+  .lx-shutter { display: none; }
   .pwa-sheet, .pwa-sheet__box,
   .lx *, .lx *::before, .lx *::after { animation: none !important; transition-duration: 0.01s !important; }
 }

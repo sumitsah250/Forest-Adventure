@@ -10,15 +10,29 @@ const FOG_BASE = 2.0;
 
 let fogPatched = false;
 
+/** GLSL for the direction toward the sun: the scene's sun (directional light 0) where a lit shader has it, else SUN_DIR. */
+const sunGlsl = (fallback: string) => /* glsl */ `
+  #if defined( HC_SUN_LIGHT ) && NUM_DIR_LIGHTS > 0
+    inverseTransformDirection( directionalLights[ 0 ].direction, viewMatrix )
+  #else
+    ${fallback}
+  #endif`;
+
 /**
  * Replaces three's distance fog with analytic exponential height fog for every
  * built-in material. scene.fog must be a THREE.Fog whose `near` holds the
  * density and `far` the height falloff (per metre).
+ *
+ * With `movingSun` (Campus Quest, whose sun sets, gives way to the moon and rises again), lit materials take the
+ * sun's glow in the fog from the scene's sun light instead of the fixed SUN_DIR. The light-scattering shader
+ * chunks then define HC_SUN_LIGHT, which foliage translucency follows too. The forest keeps its fixed sun.
  */
-export function installHeightFog(): void {
+export function installHeightFog(movingSun = false): void {
   if (fogPatched) return;
   fogPatched = true;
   const s = SUN_DIR;
+  const fixed = `vec3(${s.x.toFixed(4)}, ${s.y.toFixed(4)}, ${s.z.toFixed(4)})`;
+  if (movingSun) THREE.ShaderChunk.lights_pars_begin = `#define HC_SUN_LIGHT\n${THREE.ShaderChunk.lights_pars_begin}`;
   THREE.ShaderChunk.fog_pars_vertex = /* glsl */ `
 #ifdef USE_FOG
   varying vec3 vFogWorld;
@@ -33,7 +47,7 @@ export function installHeightFog(): void {
   uniform float fogNear;
   uniform float fogFar;
   varying vec3 vFogWorld;
-  vec3 hcApplyFog(vec3 col, vec3 worldPos) {
+  vec3 hcApplyFog(vec3 col, vec3 worldPos, vec3 sunDir) {
     vec3 ray = worldPos - cameraPosition;
     float dist = length(ray);
     vec3 dir = ray / max(dist, 1e-4);
@@ -46,14 +60,15 @@ export function installHeightFog(): void {
     // A little distance-only haze so far ridges always recede.
     amount += dist * density * 0.12;
     float f = 1.0 - exp(-max(amount, 0.0));
-    float sunAmt = pow(max(dot(dir, vec3(${s.x.toFixed(4)}, ${s.y.toFixed(4)}, ${s.z.toFixed(4)})), 0.0), 7.0);
+    float sunAmt = pow(max(dot(dir, sunDir), 0.0), 7.0);
     vec3 fc = mix(fogColor, fogColor * vec3(1.55, 1.28, 0.92), sunAmt * 0.75);
     return mix(col, fc, f);
   }
 #endif`;
   THREE.ShaderChunk.fog_fragment = /* glsl */ `
 #ifdef USE_FOG
-  gl_FragColor.rgb = hcApplyFog(gl_FragColor.rgb, vFogWorld);
+  gl_FragColor.rgb = hcApplyFog(gl_FragColor.rgb, vFogWorld, normalize(${sunGlsl(fixed)}
+  ));
 #endif`;
 }
 
@@ -69,6 +84,7 @@ const SKY_FRAG = /* glsl */ `
 uniform vec3 uSunDir;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
+uniform vec3 uHorizonAway;
 uniform vec3 uSunColor;
 uniform vec3 uFogColor;
 uniform float uTime;
@@ -91,7 +107,11 @@ float fbm(vec2 p) {
 void main() {
   vec3 d = normalize(vDir);
   float el = d.y;
-  vec3 col = mix(uHorizon, uZenith, pow(clamp(el, 0.0, 1.0), 0.5));
+  // The horizon is its sunset colour toward the sun and uHorizonAway opposite (the same colour unless a sky sets it).
+  vec2 hs = uSunDir.xz / max(length(uSunDir.xz), 1e-4);
+  vec2 hd = d.xz / max(length(d.xz), 1e-4);
+  vec3 horizon = mix(uHorizonAway, uHorizon, smoothstep(-0.6, 0.9, dot(hd, hs)));
+  vec3 col = mix(horizon, uZenith, pow(clamp(el, 0.0, 1.0), 0.5));
   float sd = max(dot(d, uSunDir), 0.0);
   col += uSunColor * (pow(sd, 2.0) * 0.06 + pow(sd, 5.0) * 0.22 + pow(sd, 48.0) * 0.5) * uSunVisible;
   if (el > -0.02) {
@@ -100,14 +120,15 @@ void main() {
     float c2 = fbm(uv * 4.1 + 3.0);
     float cover = smoothstep(0.42 - uCover * 0.25, 0.78 - uCover * 0.2, c * 0.8 + c2 * 0.25);
     float lit = 0.62 + 0.38 * pow(sd, 3.0) + (c2 - 0.5) * 0.25;
-    vec3 cloudCol = mix(uHorizon * 0.78, uHorizon * 1.12 + uSunColor * 0.16, lit);
+    vec3 cloudCol = mix(horizon * 0.78, horizon * 1.12 + uSunColor * 0.16, lit);
     // Bright silver lining where thin cloud edges face the sun.
     cloudCol += uSunColor * pow(sd, 6.0) * (1.0 - smoothstep(0.3, 0.8, c)) * 0.5;
-    cloudCol = mix(cloudCol, uHorizon * 0.62, smoothstep(0.5, 1.0, c) * 0.6);
+    cloudCol = mix(cloudCol, horizon * 0.62, smoothstep(0.5, 1.0, c) * 0.6);
     cover *= smoothstep(-0.02, 0.2, el);
     col = mix(col, cloudCol, cover * 0.92);
     float disk = smoothstep(0.99955, 0.99975, sd) * (1.0 - cover * 0.95);
-    col += uSunColor * disk * 6.0 * uSunVisible;
+    // A sun low in the haze is a dimmer disc (full strength from about 16 degrees up).
+    col += uSunColor * disk * mix(2.2, 6.0, smoothstep(0.06, 0.28, uSunDir.y)) * uSunVisible;
   }
   // Below the horizon blend into the fog colour (hidden by terrain anyway).
   col = mix(col, uFogColor, smoothstep(0.06, -0.08, el));
@@ -127,6 +148,15 @@ export interface AtmosphereState {
   fogFalloff: number;
   cover: number;
   exposure: number;
+  /** Horizon colour on the side of the sky away from the sun (default: `horizon` all round). */
+  horizonAway?: THREE.Color;
+  /** Direction toward the sun, or the moon (default SUN_DIR). Only for an Atmosphere made with movingSun. */
+  sunDir?: THREE.Vector3;
+  /**
+   * Share of the horizon colour mixed into the zenith for the sky's fill light (default 0.55): the forest's
+   * vivid blue zenith would turn its shaded floor grey-blue, but a dusk campus wants the blue in its shadows.
+   */
+  fill?: number;
 }
 
 export const AFTERNOON: AtmosphereState = {
@@ -164,14 +194,29 @@ export class Atmosphere {
   private shadowRange = 70;
   private envTarget: THREE.WebGLRenderTarget | null = null;
   private tmp = new THREE.Vector3();
+  private lightRot = new THREE.Matrix4();
+  private lightInv = new THREE.Matrix4();
+  private origin = new THREE.Vector3();
+  private down = new THREE.Vector3();
+  private up = new THREE.Vector3(0, 1, 0);
+  private warmFill = new THREE.Color(1.04, 1.0, 0.92);
+  private zenithKeep = new THREE.Color();
+  /** Direction toward the sun this frame (the same object as state.sunDir). */
+  readonly sunDir: THREE.Vector3;
+  private readonly movingSun: boolean;
+  private handover = 1;
 
-  constructor(scene: THREE.Scene) {
-    installHeightFog();
+  constructor(scene: THREE.Scene, opts: { movingSun?: boolean } = {}) {
+    this.movingSun = !!opts.movingSun;
+    installHeightFog(this.movingSun);
     this.state = cloneState(AFTERNOON);
+    this.state.horizonAway = this.state.horizon.clone();
+    this.sunDir = this.state.sunDir = SUN_DIR.clone();
     this.skyUniforms = {
-      uSunDir: { value: SUN_DIR.clone() },
+      uSunDir: { value: this.sunDir },
       uZenith: { value: this.state.zenith },
       uHorizon: { value: this.state.horizon },
+      uHorizonAway: { value: this.state.horizonAway },
       uSunColor: { value: this.state.sunColor },
       uFogColor: { value: this.state.fog },
       uTime: { value: 0 },
@@ -254,8 +299,8 @@ export class Atmosphere {
     }
     // Ambient light comes from a softened sky: the vivid blue zenith is for the eye,
     // but as fill light it would turn shaded forest floor grey-blue.
-    const zenith = this.state.zenith.clone();
-    this.state.zenith.lerp(this.state.horizon, 0.55).multiply(new THREE.Color(1.04, 1.0, 0.92));
+    const zenith = this.zenithKeep.copy(this.state.zenith);
+    this.state.zenith.lerp(this.state.horizon, this.state.fill ?? 0.55).multiply(this.warmFill);
     this.pmrem ??= new THREE.PMREMGenerator(renderer);
     const old = this.envTarget;
     this.envTarget = this.pmrem.fromScene(this.envScene, 0.02);
@@ -263,6 +308,16 @@ export class Atmosphere {
     this.state.zenith.copy(zenith);
     scene.environment = this.envTarget.texture;
     scene.environmentIntensity = this.state.envIntensity;
+  }
+
+  /**
+   * After a lost WebGL context is restored: the image-based light was rendered on the GPU and is
+   * gone (characters and buildings turned dark), and the old generator's targets are stale handles.
+   */
+  rebuildAfterContextLoss(renderer: THREE.WebGLRenderer, scene: THREE.Scene): void {
+    this.pmrem = null;
+    this.envTarget = null;
+    this.buildEnvironment(renderer, scene);
   }
 
   /** Blend towards another state (t in 0..1) — used as the story moves towards dusk. */
@@ -278,13 +333,34 @@ export class Atmosphere {
     s.fogFalloff = THREE.MathUtils.lerp(from.fogFalloff, to.fogFalloff, t);
     s.cover = THREE.MathUtils.lerp(from.cover, to.cover, t);
     s.exposure = THREE.MathUtils.lerp(from.exposure, to.exposure, t);
+    s.horizonAway?.copy(from.horizonAway ?? from.horizon).lerp(to.horizonAway ?? to.horizon, t);
+    s.fill = THREE.MathUtils.lerp(from.fill ?? 0.55, to.fill ?? 0.55, t);
+    if (this.movingSun) {
+      const a = from.sunDir ?? SUN_DIR;
+      const b = to.sunDir ?? SUN_DIR;
+      if (a.dot(b) < 0.7) {
+        // A big move (the sun setting and the moon taking over, ~150 degrees): sliding the light across the
+        // sky in a 2.5 s change swept every shadow round the ground. Fade it out, move it while it's dark,
+        // and fade it back in from its new place.
+        this.sunDir.copy(t < 0.5 ? a : b);
+        this.handover = Math.min(1, Math.abs(t - 0.5) * 4);
+      } else {
+        this.sunDir.copy(a).lerp(b, t).normalize();
+        this.handover = 1;
+      }
+    }
     this.apply(scene);
+  }
+
+  /** 0..1: how much of the sun is up mid-handover (see blend); 1 outside one. The sky's disc should follow it. */
+  get sunHandover(): number {
+    return this.handover;
   }
 
   apply(scene: THREE.Scene): void {
     const s = this.state;
     this.sun.color.copy(s.sunColor);
-    this.sun.intensity = s.sunIntensity;
+    this.sun.intensity = s.sunIntensity * this.handover;
     this.fog.color.copy(s.fog);
     this.fog.near = s.fogDensity;
     this.fog.far = s.fogFalloff;
@@ -299,15 +375,20 @@ export class Atmosphere {
     const range = this.shadowRange;
     const texel = (range * 2) / this.sun.shadow.mapSize.x;
     const center = this.tmp.copy(focus);
-    const lightRot = new THREE.Matrix4().lookAt(new THREE.Vector3(), SUN_DIR.clone().negate(), new THREE.Vector3(0, 1, 0));
-    const inv = lightRot.clone().invert();
+    const dir = this.sunDir;
+    // (Cached matrices: this ran every frame and made five new objects each time.)
+    const lightRot = this.lightRot.lookAt(this.origin, this.down.copy(dir).negate(), this.up);
+    const inv = this.lightInv.copy(lightRot).invert();
     center.applyMatrix4(inv);
     center.x = Math.round(center.x / texel) * texel;
     center.y = Math.round(center.y / texel) * texel;
     center.applyMatrix4(lightRot);
     this.sun.target.position.copy(center);
-    this.sun.position.copy(center).addScaledVector(SUN_DIR, 200);
+    this.sun.position.copy(center).addScaledVector(dir, 200);
     this.sun.target.updateMatrixWorld();
+    // A low sun meets the ground at a grazing angle, where one shadow-map texel spans more depth: push the lookup
+    // further off the surface (unchanged from about 17 degrees up, where the forest's fixed sun stands).
+    if (this.movingSun) this.sun.shadow.normalBias = 0.035 * THREE.MathUtils.clamp(0.3 / Math.max(dir.y, 0.05), 1, 2.6);
   }
 }
 
@@ -318,5 +399,7 @@ function cloneState(s: AtmosphereState): AtmosphereState {
     horizon: s.horizon.clone(),
     fog: s.fog.clone(),
     sunColor: s.sunColor.clone(),
+    horizonAway: s.horizonAway?.clone(),
+    sunDir: s.sunDir?.clone(),
   };
 }

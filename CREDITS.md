@@ -12,6 +12,13 @@ written for this project. Weapon names, manufacturers and the people in the stor
 - Rapier physics, `@dimforge/rapier3d-compat` (Apache-2.0): https://rapier.rs
 - Vite (MIT), TypeScript (Apache-2.0), playwright-core (Apache-2.0; tests only)
 
+## Fonts
+
+On the install page (`src/launcher/fonts/`), from Google Fonts, both SIL Open Font License 1.1:
+
+- Teko, by Indian Type Foundry: https://fonts.google.com/specimen/Teko
+- Mukta, by Ek Type: https://fonts.google.com/specimen/Mukta
+
 ## Assets: Poly Haven, CC0 (public domain)
 
 Downloaded by `scripts/fetch-assets.mjs` from https://polyhaven.com.

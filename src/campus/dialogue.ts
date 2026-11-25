@@ -244,7 +244,7 @@ export interface RadioLogEntry {
   m: string;
   who: string;
   text: string;
-  /** A clue this line can prove when pinned to the board (Sunil's "6:55": c2). */
+  /** A clue this line can prove when pinned to the board (Sumit's "6:55": c2). */
   clue?: string;
   /** Pinned to the board already. */
   pinned?: boolean;

@@ -39,6 +39,11 @@ export class Vehicle {
   private headlights: THREE.SpotLight[] = [];
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
+  private tmp3 = new THREE.Vector3();
+  /** Chase camera: eased speed stretch, follow rate, and the shake noise clock. */
+  private stretch = 0;
+  private follow = 6.5;
+  private shakeT = 0;
   private ray: InstanceType<PhysicsWorld['R']['Ray']>;
   onImpact: ((strength: number) => void) | null = null;
   /** Camera shake from impacts (0..1), decays quickly. */
@@ -117,6 +122,9 @@ export class Vehicle {
     // Start the chase camera behind the truck.
     const b = this.phys.basis();
     this.camPos.copy(this.curPos).add(new THREE.Vector3(-b.fx * 7, 2.8, -b.fz * 7));
+    this.camLook.copy(this.curPos).add(new THREE.Vector3(b.fx * 2.2, 1.2, b.fz * 2.2));
+    this.stretch = 0;
+    this.follow = 6.5;
   }
 
   /** Finds a free spot beside the truck and puts the player there. Returns false if blocked. */
@@ -187,8 +195,13 @@ export class Vehicle {
 
   /** Per fixed step. Input is sampled once per frame and stored on phys.input. */
   fixedUpdate(dt: number): void {
-    this.prevPos.copy(this.curPos);
-    this.prevQuat.copy(this.curQuat);
+    // The state before this step, read from the body: `curPos` is only refreshed in postPhysics()
+    // after all of a frame's steps, so on a frame that ran two steps the old copy made the render
+    // blend from two steps back with a one-step alpha, and Kalki jumped backwards for a frame.
+    const t = this.phys.body.translation();
+    const r = this.phys.body.rotation();
+    this.prevPos.set(t.x, t.y, t.z);
+    this.prevQuat.set(r.x, r.y, r.z, r.w);
     this.phys.fixedUpdate(dt);
   }
 
@@ -249,7 +262,6 @@ export class Vehicle {
 
   /** Writes the active vehicle camera. `look` is the mouse delta this frame. */
   updateCamera(camera: THREE.PerspectiveCamera, dt: number, look: { x: number; y: number }, sensitivity: number): void {
-    const b = this.phys.basis();
     const k = 0.0022 * sensitivity;
     if (this.cameraMode === 'cockpit') {
       this.cockpitYaw = THREE.MathUtils.clamp(this.cockpitYaw - look.x * k, -1.9, 1.9);
@@ -260,7 +272,10 @@ export class Vehicle {
       camera.quaternion.copy(this.renderQuat).multiply(q);
       return;
     }
-    // Chase camera with mouse orbit that eases back behind the truck.
+    // The chase camera follows the interpolated body (renderQuat), not the last physics step:
+    // with the raw step's heading the view swung in steps whenever the display rate wasn't the
+    // 60 Hz physics rate (144 Hz screens, or any uneven frame), and turns looked jittery.
+    const fwd = this.tmp3.set(0, 0, 1).applyQuaternion(this.renderQuat);
     if (Math.abs(look.x) + Math.abs(look.y) > 0.5) {
       this.orbitYaw -= look.x * k;
       this.orbitPitch = THREE.MathUtils.clamp(this.orbitPitch + look.y * k * 0.7, -0.15, 0.85);
@@ -272,9 +287,12 @@ export class Vehicle {
         this.orbitPitch = THREE.MathUtils.damp(this.orbitPitch, 0.12, 2, dt);
       }
     }
-    const heading = Math.atan2(b.fx, b.fz) + this.orbitYaw + (this.phys.speed < -1 ? 0 : 0);
-    const dist = this.chaseDistance + Math.min(1.6, Math.abs(this.phys.speed) * this.chaseStretch);
-    const pivot = this.tmp2.copy(this.renderPos).add(new THREE.Vector3(0, this.chaseHeight, 0));
+    const heading = Math.atan2(fwd.x, fwd.z) + this.orbitYaw;
+    // Speed is a physics-step value: ease the stretch so the distance doesn't step with it.
+    this.stretch = THREE.MathUtils.damp(this.stretch, Math.min(1.6, Math.abs(this.phys.speed) * this.chaseStretch), 4, dt);
+    const dist = this.chaseDistance + this.stretch;
+    const pivot = this.tmp2.copy(this.renderPos);
+    pivot.y += this.chaseHeight;
     const desired = this.tmp.set(
       pivot.x - Math.sin(heading) * Math.cos(this.orbitPitch) * dist,
       pivot.y + Math.sin(this.orbitPitch) * dist + 0.6,
@@ -290,24 +308,36 @@ export class Vehicle {
     if (hit) desired.copy(pivot).addScaledVector(dir, Math.max(1.4, hit.timeOfImpact - 0.35));
     const ground = this.terrain.heightAt(desired.x, desired.z) + 0.45;
     if (desired.y < ground) desired.y = ground;
-    const follow = hit ? 18 : 6.5;
+    // Follow harder while something is in the way, but blend the rate: switching it outright made
+    // the camera lurch whenever the ray started or stopped touching a wall or a trunk.
+    this.follow = THREE.MathUtils.damp(this.follow, hit ? 18 : 6.5, 8, dt);
+    const follow = this.follow;
     this.camPos.x = THREE.MathUtils.damp(this.camPos.x, desired.x, follow, dt);
     this.camPos.y = THREE.MathUtils.damp(this.camPos.y, desired.y, follow, dt);
     this.camPos.z = THREE.MathUtils.damp(this.camPos.z, desired.z, follow, dt);
     if (this.camPos.distanceTo(desired) > 25) this.camPos.copy(desired);
-    const lookTarget = this.tmp2.copy(this.renderPos).add(new THREE.Vector3(b.fx * 2.2, 1.2, b.fz * 2.2));
-    this.camLook.lerp(lookTarget, Math.min(1, dt * 12));
+    const lookTarget = this.tmp2.copy(this.renderPos);
+    lookTarget.x += fwd.x * 2.2;
+    lookTarget.y += 1.2;
+    lookTarget.z += fwd.z * 2.2;
+    // Frame-rate independent (it was lerp by dt * 12, which eases differently at 30, 60 and 144 Hz).
+    const kl = 1 - Math.exp(-12 * dt);
+    this.camLook.lerp(lookTarget, kl);
     if (this.camLook.distanceTo(lookTarget) > 10) this.camLook.copy(lookTarget);
     camera.position.copy(this.camPos);
     camera.lookAt(this.camLook);
-    // Short shake after hard knocks, plus a faint rumble on rough ground at speed.
+    // Short shake after hard knocks, plus a faint rumble on rough ground at speed. Smooth noise
+    // (a few incommensurate sines), not a fresh random offset every frame: per-frame white noise
+    // reads as jitter, and more of it the higher the frame rate.
     this.shake = Math.max(0, this.shake - dt * 2.5);
+    this.shakeT += dt;
     const rough = this.phys.wheelSurface[0] === 'gravel' || this.phys.wheelSurface[0] === 'mud' ? Math.min(1, Math.abs(this.phys.speed) / 25) * 0.012 : 0;
     const s = this.shake * 0.18 + rough;
     if (s > 0.001) {
-      camera.position.x += (Math.random() - 0.5) * s;
-      camera.position.y += (Math.random() - 0.5) * s;
-      camera.position.z += (Math.random() - 0.5) * s;
+      const t = this.shakeT;
+      camera.position.x += (Math.sin(t * 37.1) * 0.6 + Math.sin(t * 23.3 + 1.7) * 0.4) * s * 0.5;
+      camera.position.y += (Math.sin(t * 41.7 + 0.6) * 0.6 + Math.sin(t * 29.1 + 2.9) * 0.4) * s * 0.5;
+      camera.position.z += (Math.sin(t * 33.9 + 2.2) * 0.6 + Math.sin(t * 19.7 + 0.4) * 0.4) * s * 0.5;
     }
   }
 

@@ -55,6 +55,23 @@ export class Player {
   pitch = 0;
   /** Body heading in the same convention as yaw. */
   facing = 0;
+  /** Body heading as drawn: blended between physics steps like the position (see animate()). */
+  renderFacing = 0;
+  /** Heading at the start of the last physics step, and at its end. */
+  private prevFacing = 0;
+  private stepFacing = 0;
+  /**
+   * Smooth the drawn body over step-ups and step-downs (stairs, kerbs): the capsule climbs a
+   * riser in one physics step, which jerked the whole body up 15-20 cm in one frame. Off by
+   * default (the forest game keeps its own feel); Campus Quest turns it on.
+   */
+  smoothSteps = false;
+  /** Feet position as drawn: renderPos plus the easing step offset. */
+  readonly drawPos = new THREE.Vector3();
+  private stepOff = 0;
+  private lastRenderY = 0;
+  /** `grounded` as of the last drawn frame (step smoothing ignores the frame a jump lands). */
+  private drawnGrounded = false;
   private hVel = new THREE.Vector2();
   private vVel = 0;
   readonly velocity = new THREE.Vector3();
@@ -136,6 +153,9 @@ export class Player {
     this.renderPos.copy(this.position);
     this.yaw = yaw;
     this.facing = yaw;
+    this.renderFacing = this.prevFacing = this.stepFacing = yaw;
+    this.drawPos.copy(this.position);
+    this.lastRenderY = this.position.y;
     this.eyeY = y + 1.64;
     this.tpc = new ThirdPersonCamera(physics, terrain);
   }
@@ -164,10 +184,20 @@ export class Player {
     this.eyeY = y + 1.64;
     this.hVel.set(0, 0);
     this.vVel = 0;
+    // Teleports set the player down on the ground. Say so: a story or mission start teleports and then
+    // pauses physics (the intro, the opening radio lines), and until the next physics step the pose
+    // thought the player was falling and held them tucked up, crouched, the whole time.
+    this.grounded = true;
+    this.wasGrounded = true;
+    this.airTime = 0;
     if (yaw !== undefined) {
       this.yaw = yaw;
       this.facing = yaw;
     }
+    this.renderFacing = this.prevFacing = this.stepFacing = this.facing;
+    this.drawPos.copy(this.position);
+    this.stepOff = 0;
+    this.lastRenderY = this.position.y;
     this.animator?.reset(this.position, this.facing + Math.PI);
     this.tpc.reset();
   }
@@ -191,6 +221,20 @@ export class Player {
 
   private jumpQueued = false;
 
+  /**
+   * The simulation is paused around the player (a dialogue, a quiz, a cutscene) but the
+   * pose still animates: drop the walking speed so the body settles to idle instead of
+   * running in place with the last frame's velocity.
+   */
+  halt(): void {
+    this.hVel.set(0, 0);
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+    this.speed = 0;
+    this.sprinting = false;
+    this.jumpQueued = false;
+  }
+
   /** Queue a jump from per-frame input; consumed by the next fixed step. */
   requestJump(): void {
     this.jumpQueued = true;
@@ -198,7 +242,10 @@ export class Player {
 
   update(dt: number, input: Input): void {
     this.prevPos.copy(this.position);
+    // From the heading as it is now (a script may have set it since the last step: no blend across that).
+    this.prevFacing = this.facing;
     if (!this.enabled) {
+      this.stepFacing = this.facing;
       this.jumpQueued = false;
       return;
     }
@@ -233,6 +280,7 @@ export class Player {
     const turnRate = this.strafe ? 18 : this.sprinting ? this.turnRun : this.turnWalk;
     const d = angleDelta(this.facing, want);
     this.facing += d * (1 - Math.exp(-turnRate * dt));
+    this.stepFacing = this.facing;
 
     if (this.grounded) {
       this.airTime = 0;
@@ -248,7 +296,10 @@ export class Player {
     this.vVel -= GRAVITY * dt;
     this.vVel = Math.max(this.vVel, -40);
 
-    const desired = { x: this.hVel.x * dt, y: this.vVel * dt, z: this.hVel.y * dt };
+    // On the ground the move has no downward part: snap-to-ground keeps the feet on slopes and down
+    // steps, and Rapier only steps up (autostep) a move without one. With it, the player could not climb
+    // a single stair anywhere (the RIC's steps, the temple's), only walk into the first riser.
+    const desired = { x: this.hVel.x * dt, y: this.grounded && this.vVel <= 0 ? 0 : this.vVel * dt, z: this.hVel.y * dt };
     this.controller.computeColliderMovement(this.collider, desired, undefined, groups(GROUP.PLAYER, GROUP.STATIC | GROUP.VEHICLE | GROUP.DYNAMIC | GROUP.NPC));
     const mv = this.controller.computedMovement();
     const t = this.body.translation();
@@ -301,12 +352,38 @@ export class Player {
 
   /** Per rendered frame: interpolate the body and pose the character. */
   animate(dt: number, alpha: number, lookAt: THREE.Vector3 | null): void {
-    this.renderPos.lerpVectors(this.prevPos, this.position, THREE.MathUtils.clamp(alpha, 0, 1));
+    const a = THREE.MathUtils.clamp(alpha, 0, 1);
+    this.renderPos.lerpVectors(this.prevPos, this.position, a);
+    if (this.facing !== this.stepFacing) {
+      // The heading was set from outside while the simulation is paused (a conversation turns the
+      // player to the person): turn there at a natural pace instead of snapping round in one frame.
+      this.renderFacing += angleDelta(this.renderFacing, this.facing) * (1 - Math.exp(-7 * Math.max(dt, 0)));
+    } else {
+      // Blended between physics steps like the position, so turns are smooth at any frame rate
+      // (at 144 Hz the body otherwise turned in steps on two frames out of three).
+      this.renderFacing = this.prevFacing + angleDelta(this.prevFacing, this.facing) * a;
+    }
+    this.drawPos.copy(this.renderPos);
+    if (this.smoothSteps) {
+      // A step-up or step-down moves the capsule faster than any walkable slope: hold the drawn body
+      // where it was and ease it over the step (the feet IK keeps them on the treads meanwhile).
+      // (Over 3.5 m/s vertical counts as a step; what a steep ramp explains is left in, so running up a
+      // stair ramp doesn't sink the body.)
+      // Only while on the ground on the frame before too: the frame a jump or fall lands is grounded and
+      // drops fast, and counting it as a step held the body up in the air while the feet planted.
+      const dy = this.renderPos.y - this.lastRenderY;
+      if (this.grounded && this.drawnGrounded && dt > 0 && Math.abs(dy) > Math.max(0.035, 3.5 * dt) && Math.abs(dy) < 0.6) this.stepOff -= dy - Math.sign(dy) * 1.6 * dt;
+      if (!this.grounded) this.stepOff *= Math.exp(-25 * Math.max(dt, 0));
+      this.stepOff = THREE.MathUtils.clamp(this.stepOff, -0.45, 0.45) * Math.exp(-14 * Math.max(dt, 0));
+      this.drawPos.y += this.stepOff;
+    }
+    this.lastRenderY = this.renderPos.y;
+    this.drawnGrounded = this.grounded;
     if (!this.animator || !this.enabled || dt <= 0) return;
     this.animator.update(dt, {
-      pos: this.renderPos,
+      pos: this.drawPos,
       vel: this.velocity,
-      facing: this.facing + Math.PI,
+      facing: this.renderFacing + Math.PI,
       grounded: this.grounded,
       crouch: this.crouchT,
       sprint: this.sprinting,
@@ -328,18 +405,22 @@ export class Player {
   }
 
   /**
-   * Seated in an open vehicle (a go-kart): the character stays visible, sits with the
+   * Seated in an open vehicle (Kalki, the dune buggy): the character stays visible, sits with the
    * pelvis on `seat` (world) and follows the vehicle's full orientation `quat` (+Z forward).
    * `hands` are wrist targets in character space (null: hands rest in the lap).
    */
+  private seatFwd = new THREE.Vector3();
+  private seatOrigin = new THREE.Vector3();
+  private seatVel = new THREE.Vector3();
+
   animateSeated(dt: number, seat: THREE.Vector3, quat: THREE.Quaternion, hands: HandTargets | null, sitFeet?: { y: number; z: number }): void {
     if (!this.character || !this.animator) return;
-    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+    const fwd = this.seatFwd.set(0, 0, 1).applyQuaternion(quat);
     const facing = Math.atan2(fwd.x, fwd.z);
     // The sit pose puts the pelvis 0.53 m above the character origin.
-    const origin = new THREE.Vector3(0, -0.53, 0).applyQuaternion(quat).add(seat);
+    const origin = this.seatOrigin.set(0, -0.53, 0).applyQuaternion(quat).add(seat);
     this.animator.update(Math.max(dt, 1e-3), {
-      pos: origin, vel: new THREE.Vector3(), facing, grounded: true, crouch: 0, sprint: false,
+      pos: origin, vel: this.seatVel.set(0, 0, 0), facing, grounded: true, crouch: 0, sprint: false,
       aimPitch: 0, aimAmount: 0, lookAt: null, hands, pose: 'sit', flinch: 0, sitFeet,
     });
     this.clips?.update(dt, { speed: 0, grounded: true, vy: 0, active: false });

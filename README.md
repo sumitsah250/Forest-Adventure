@@ -25,8 +25,11 @@ Medium at about 25–28 ms.
 ## Install as an app (phone, tablet or laptop)
 
 The site's front page (`index.html`) is an install page for **Sumix Games**, one app containing both games. It
-loads nothing heavy: it shows the games and an **Install** button (on iPhone/iPad it shows the *Share → Add to
-Home Screen* steps). Opened as the installed app, the same page downloads every game file to the device once, with
+opens on Campus Quest's trailer, filmed in the game itself by `npm run trailer` (`scripts/capture-trailer.mjs`: a
+32 s, 3.6 MB WebM that streams; browsers that can't play WebM, and phones on Data Saver, get its stills instead),
+with the story clock and captions following each shot. Below it are the night's missions on a timeline and an
+**Install** button (on iPhone/iPad it shows the *Share → Add to Home Screen* steps). Re-film the trailer after map
+or lighting changes. Opened as the installed app, the same page downloads every game file to the device once, with
 a progress bar, then offers **Play** for each game. From then on the games load from the device and work offline.
 On Android, Chrome turns the installed app into a real home-screen app (a "WebAPK").
 
@@ -67,6 +70,12 @@ http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's
   be entered: three floors of departments, classrooms and labs. The
   surrounding Lamachaur neighbourhood is included, and the Annapurna range with Machhapuchhre stands on the
   northern horizon.
+- **Measured from a drone survey** (`scripts/build-campus-scan.mjs`). A photogrammetry model of the campus
+  (Agisoft Metashape mesh and 15 cm surface model) sets every surveyed building's height, flat or pitched
+  roof (gable or hip, ridge where it really is), taller wings, roof and wall colours; the ground at 4 m
+  from the survey's bare earth; footpaths, yards and lawns from the drone's top-down photo; and the trees
+  where their crowns are, at their height. `npm run test:scan` checks the game against the survey: roofs
+  within 7 cm (median, 90% within 0.4 m), ground within 14 cm, plus side-by-side renders.
 - **Blackout at WRC** (`src/campus/story.ts`). The night before the tech fest, the campus AI MITRA locks
   every gate and seizes the exam server. Sixteen missions from dusk (6:52 PM) through a moonlit night to
   sunrise: collect evidence against the clock, sneak past searchlight drones, chase a courier drone, solve
@@ -75,7 +84,7 @@ http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's
 - **Cinematic** (`src/campus/cinema.ts`, `fx.ts`): a letterboxed fly-in with a title card for every mission,
   over-the-shoulder conversations, a victory orbit, slow motion on big moments, monsoon rain with lightning
   and thunder through the night, and fireworks at the end.
-- **Kalki** (`src/campus/kart.ts`), the Automobile Club's go-kart: rear drive on the shared ray-cast
+- **Kalki** (`src/campus/kart.ts`), the Automobile Club's dune buggy (model built from art-source/ by `scripts/build-kalki-model.mjs`): rear drive on the shared ray-cast
   vehicle physics, the driver seated with hands on the wheel, **Shift** boost, **Space** + turn to drift
   (release for a mini-turbo), stunt humps on the ring road (`ramps.ts`) for air time, **K** calls it to you.
 - **Rewards after every mission** (`src/campus/profile.ts`): 1–3 stars (finish, no hearts lost, under the
@@ -91,7 +100,8 @@ http://localhost:5173/campus.html (or choose *Campus Quest* on the forest game's
 
 Regenerate the map data in this order: `node scripts/build-campus-data.mjs` (OpenStreetMap Overpass),
 `node scripts/build-campus-dem.mjs` (10 m elevation), `node scripts/merge-ms-buildings.mjs` (missing
-buildings). Floor counts and walk-in buildings are set in `src/campus/buildingOverrides.ts`.
+buildings), then `npm run campus:scan` (the drone survey in `actual models/`, kept out of git: heights,
+roofs, ground, surfaces, trees). Every campus building is walk-in: what it is and its rooms come from `src/campus/interiors/program.ts` (correct a guess with `use` in `src/campus/buildingOverrides.ts`), the layout and streaming from `src/campus/interior.ts`, the furniture from `src/campus/interiors/`.
 
 ## Controls
 

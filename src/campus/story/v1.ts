@@ -7,7 +7,7 @@ import type { MissionDef, NpcDef } from './types.ts';
 
 export const NPCS: NpcDef[] = [
   {
-    id: 'asha', name: 'Asha Gurung', role: 'Final-year Computer · MITRA\'s creator',
+    id: 'asha', name: 'Asha Gurung', role: 'Final-year Computer · runs MITRA',
     outfit: { ...base, id: 'bw-asha', skin: '#b58262', hair: '#120e0c', top: '#3d6b8a', topPattern: 'knit', trousers: '#2a3140', trouserPattern: 'denim', boots: '#ecebe6', headwear: 'none', backpack: '#6a2a3a', female: true, hairStyle: 'ponytail' },
     at: { building: 'Research and Innovation Centre (RIC)' },
   },
@@ -47,7 +47,7 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'radio', from: 'mitra', lines: ['INTRUDER DETECTED.', 'Lockdown active. Do not run.'] },
       { kind: 'radio', from: 'asha', lines: ['Run! Behind the RIC — I have wheels. Keep out of the drone lights!'] },
       { kind: 'stealth', obj: 'Reach Asha behind the RIC', at: { xz: [17, -103] }, label: 'Asha', model: 'relay', drones: 3, auto: true },
-      { kind: 'talk', npc: 'asha', at: { xz: [17, -103] }, lines: ['This is Kalki — the Automobile Club\'s go-kart.', 'Dhungana sir will kill us. Get in!'] },
+      { kind: 'talk', npc: 'asha', at: { xz: [17, -103] }, lines: ['This is Kalki — the Automobile Club\'s dune buggy.', 'Dhungana sir will kill us. Get in!'] },
       { kind: 'kart', obj: 'Jump into Kalki!' },
       { kind: 'drive', obj: 'Lose the drone — drive through the rings!', route: ESCAPE, time: 70, pursuer: true },
       { kind: 'radio', from: 'mitra', lines: ['Pursuit unit lost.', '…Interesting.'] },
@@ -57,9 +57,9 @@ export const MISSIONS: MissionDef[] = [
   },
   {
     id: 'kalki', title: 'Pit Stop', clock: '7:05 PM', sky: 'dusk', par: 140,
-    brief: 'Dhungana sir wants his kart back.',
+    brief: 'Dhungana sir wants his buggy back.',
     steps: [
-      { kind: 'talk', npc: 'adhikari', lines: ['A joyride in my kart? During a lockdown?', '…Fine. She is on fumes. Prime the pump — three clean strokes.'] },
+      { kind: 'talk', npc: 'adhikari', lines: ['A joyride in my buggy? During a lockdown?', '…Fine. She is on fumes. Prime the pump — three clean strokes.'] },
       {
         kind: 'puzzle', at: { building: 'Automobile Workshop II' }, label: 'Kalki\'s fuel pump', obj: 'Prime Kalki\'s fuel pump', model: 'part',
         puzzle: { type: 'gauge', title: 'Prime the fuel pump', clue: 'Hit SPACE in the green.', hits: 3, speed: 0.9 },
@@ -154,16 +154,16 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'talk', npc: 'baral', lines: ['Code = the call numbers in shelf order.'] },
       {
         kind: 'puzzle', at: { building: 'WRC Library' }, label: 'Librarian\'s desk', obj: 'Unlock the librarian\'s desk', model: 'panel',
-        puzzle: { type: 'keypad', title: 'Librarian\'s desk lock', clue: 'Logic, Data, Ethics.', code: '472', why: 'Logic (4), Data (7), Ethics (2): 472.' },
+        puzzle: { type: 'keypad', title: 'Librarian\'s desk lock', clue: 'The spines you brought back: Ethics of AI …2 · Digital Logic …4 · Data Structures …7. Enter the last digits in shelf order: Logic, Data, Ethics.', code: '472', why: 'Logic (4), Data (7), Ethics (2): 472.' },
       },
-      { kind: 'talk', npc: 'baral', lines: ['"Ethics of AI", borrowed 6:30 PM by… "S. B…"', 'He dropped a key. I heard a splash. Riddle:'] },
+      { kind: 'talk', npc: 'baral', lines: ['"Ethics of AI", borrowed 6:30 PM by… "Sumi…"', 'He dropped a key. I heard a splash. Riddle:'] },
       {
         kind: 'riddle', from: 'baral', title: 'Ms. Khanal\'s riddle', label: 'Dropped library key', model: 'evidence',
         riddle: 'I wear no crown but I wear a spray. I never thirst, and I greet everyone who comes in from the gate.',
         answer: { point: 'IOE fountain', dz: 3.6 }, hints: ['Water, on the road in from the main gate.', 'The IOE fountain.'],
       },
     ],
-    reward: { coins: 170, xp: 170, card: 'EVIDENCE: the library log — "Ethics of AI" borrowed by "S. B…" at 6:30 PM.' },
+    reward: { coins: 170, xp: 170, card: 'EVIDENCE: the library log — "Ethics of AI" borrowed by "Sumi…" at 6:30 PM.' },
   },
   {
     id: 'drones', title: 'Drone Patrol', clock: '8:30 PM', sky: 'night', par: 190,
@@ -247,7 +247,7 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       { kind: 'radio', from: 'asha', lines: ['A drone is flying off with the backup key!', 'Get in Kalki — catch it!'] },
       { kind: 'chase', obj: 'Catch the courier drone', route: [[187, 85], ...RING_NORTH], time: 100, speed: 10.5 },
-      { kind: 'radio', from: 'asha', lines: ['The key\'s log: last command from "sbasnet".'] },
+      { kind: 'radio', from: 'asha', lines: ['The key\'s log: last command from "sumit.dev".'] },
     ],
     reward: { coins: 230, xp: 230, unlock: 'trial', card: 'TIME TRIAL unlocked: drive Kalki through the start gate on the east ring road. Beat your record for coins!' },
   },
@@ -257,7 +257,7 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       {
         kind: 'talk', npc: 'thapa', lines: [
-          '"sbasnet" — Sunil Basnet, the exam-server contractor.',
+          '"sumit.dev" — Sumit, the alumnus who built MITRA alone.',
           'A name proves nothing. The code will. Find the bug.',
         ],
       },
@@ -292,7 +292,7 @@ export const MISSIONS: MissionDef[] = [
     steps: [
       {
         kind: 'talk', npc: 'guard', lines: [
-          'Late tonight: Raju from the lab, Asha, and Sunil Basnet.',
+          'Late tonight: Raju from the lab, Asha, and Sumit.',
           'The hostel boys found things. Go look.',
         ],
       },
@@ -306,18 +306,19 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'talk', npc: 'guard', lines: ['Grey hoodie. Red pen drive. So — who?'] },
       {
         kind: 'choose', npc: 'guard', question: 'Who changed MITRA\'s code at 6:55 PM?',
-        options: ['Raju, the lab assistant — he knows MITRA\'s code best', 'Asha — it is her own project', 'Sunil Basnet — the contractor who installed the exam server', 'Krishna Dai — he was near the admin block'],
+        options: ['Raju, the lab assistant — he knows MITRA\'s code best', 'Asha — she runs MITRA for the Exam Section', 'Sumit — the alumnus who built MITRA', 'Krishna Dai — he was near the admin block'],
         answer: 2,
-        why: 'The ID card "S—", the cup "S.", the library log "S. B…", the account "sbasnet", the server terminal and the server company\'s pen drive all point to Sunil Basnet.',
+        why: 'The ID card "S—", the cup "S.", the library log "Sumi…", the account "sumit.dev", the server terminal and the red pen drive all point to Sumit.',
       },
       {
         kind: 'talk', npc: 'guard', lines: [
-          'Sunil Basnet! Leak the paper, blame MITRA.',
+          'Sumit! He built MITRA, warned us it was dangerous, and nobody listened.',
+          'So tonight he turned it on us himself. Leak the paper, blame MITRA.',
           'MITRA is still locked. The firewall waits.',
         ],
       },
     ],
-    reward: { coins: 240, xp: 240, card: 'CASE CLOSED: Sunil Basnet planted the bugs to leak the exam and blame MITRA.' },
+    reward: { coins: 240, xp: 240, card: 'CASE CLOSED: Sumit, the hacker who built MITRA, planted the bugs to prove it unsafe.' },
   },
   {
     id: 'firewall', title: 'Firewall', clock: '3:30 AM', sky: 'night', par: 280,
@@ -390,7 +391,7 @@ export const WEATHER: Record<string, 'clear' | 'drizzle' | 'storm'> = {
 /** Name and tag line on the title screen's story picker. */
 export const STORY_NAME = 'Lockdown Night';
 export const STORY_TAG = 'The original · 16 missions';
-export const STORY_BLURB ='The night before the tech fest, the campus AI locks every gate and seizes the exam server. Sixteen missions, one night, one go-kart called <b>Kalki</b> — find who did it before the paper leaks at 9 AM.';
+export const STORY_BLURB ='The night before the tech fest, the campus AI locks every gate and seizes the exam server. Sixteen missions, one night, one dune buggy called <b>Kalki</b> — find who did it before the paper leaks at 9 AM.';
 
 /** Share of campus with its power back after `story` finished missions: a little more each mission. */
 export function powerLevel(story: number): number {

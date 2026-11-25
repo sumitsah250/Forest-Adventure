@@ -8,6 +8,8 @@ import { installButton } from '../pwa.ts';
 import { isEnabled } from '../games.ts';
 import type { ModalHost } from './minigames.ts';
 import { paintPlan } from './paint.ts';
+import { scanGround } from './scanGround.ts';
+import type { Quality } from '../core/settings.ts';
 import { DEMO_MODE, STORY_BLURB, STORY_CHOICES, STORY_PICK, STORY_VERSION, chooseStory } from './story.ts';
 import { openRadioLog, runDialogue, type DialogueDeps, type PinOptions, type RadioLogEntry } from './dialogue.ts';
 
@@ -101,6 +103,7 @@ export class CampusUI implements ModalHost {
   private shardsEl: HTMLDivElement;
   private promptEl: HTMLDivElement;
   private compass: HTMLDivElement;
+  private compassW = 420;
   private compassStrip: HTMLDivElement;
   private compassMark: HTMLDivElement;
   private compassDist: HTMLDivElement;
@@ -164,6 +167,9 @@ export class CampusUI implements ModalHost {
     this.compassDist = el('div', 'cq-compass__dist');
     this.compass.append(this.compassStrip, this.compassMark, this.compassDist);
     this.buildCompass();
+    // The compass width, kept current here: reading clientWidth every frame made the browser lay out the
+    // page every frame (the HUD changes text each frame, so the layout was always stale).
+    new ResizeObserver((e) => (this.compassW = e[0].contentRect.width || this.compassW)).observe(this.compass);
     this.timerEl = el('div', 'cq-timer');
     this.sunEl = el('div', 'cq-sunrise');
     this.sunEl.style.display = 'none';
@@ -312,6 +318,8 @@ export class CampusUI implements ModalHost {
     this.badgeBusy = true;
     this.badgeEl.innerHTML = `<b>${esc(b.icon)}</b><div><small>${esc(b.title)}</small>${esc(b.sub)}</div>`;
     this.badgeEl.classList.remove('show');
+    // Over a full-screen card (mission complete, a message) the top centre is its title: use the corner.
+    this.badgeEl.classList.toggle('side', !!this.overlay);
     void this.badgeEl.offsetWidth;
     this.badgeEl.classList.add('show');
     this.onSound?.('badge');
@@ -465,7 +473,7 @@ export class CampusUI implements ModalHost {
 
   /** Heading and target bearings in degrees clockwise from north. */
   updateNav(px: number, pz: number, heading: number, target: NavTarget | null, extra: NavTarget[] = [], shards: { x: number; z: number }[] = [], kart: { x: number; z: number } | null = null): void {
-    const w = this.compass.clientWidth || 420;
+    const w = this.compassW;
     this.compassStrip.style.transform = `translateX(${w / 2 - heading * 4}px)`;
     if (target) {
       const dx = target.x - px;
@@ -483,10 +491,25 @@ export class CampusUI implements ModalHost {
       this.compassMark.style.opacity = '0';
       this.compassDist.textContent = '';
     }
-    this.drawMini(px, pz, heading, target, extra, shards, kart);
+    // The minimap is a CPU canvas: redrawn every other frame (30 a second) it still turns smoothly.
+    if ((this.miniFrame = (this.miniFrame + 1) & 1) === 0) this.drawMini(px, pz, heading, target, extra, shards, kart);
   }
 
+  private miniFrame = 0;
+
+  private miniChecks = 0;
+
   private drawMini(px: number, pz: number, heading: number, target: NavTarget | null, extra: NavTarget[], shards: { x: number; z: number }[], kart: { x: number; z: number } | null): void {
+    // Every couple of seconds: the plan is painted opaque edge to edge, so a see-through pixel means the
+    // browser threw it away (a GPU reset); paint it again rather than show a blank minimap all game.
+    if ((this.miniChecks = (this.miniChecks + 1) % 120) === 0) {
+      const m = this.mapCanvas;
+      const mctx = m.getContext('2d');
+      if (mctx && mctx.getImageData(m.width >> 1, m.height >> 1, 1, 1).data[3] === 0) {
+        mctx.drawImage(paintPlan(m.width, 'map', scanGround()), 0, 0);
+        this.hiMap = null;
+      }
+    }
     const c = this.miniCtx;
     const S = this.mini.width;
     const range = 120; // metres from centre to edge
@@ -835,6 +858,7 @@ export class CampusUI implements ModalHost {
     player?: { line: string; onEdit: () => void } | null;
     /** Extra menu entries (label, small text, action), shown after the main ones. */
     extra?: { label: string; small: string; run: () => void }[];
+    graphics?: GraphicsPick;
   }): void {
     const ov = this.open('cq-overlay--title');
     const box = el('div', 'cq-title');
@@ -865,6 +889,7 @@ export class CampusUI implements ModalHost {
       pick.append(row);
       box.append(pick);
     }
+    if (o.graphics) box.append(graphicsPicker(o.graphics));
     const menu = el('div', 'cq-menu');
     if (o.continueLabel) {
       const c = el('button', 'cq-btn cq-btn--primary', `Continue <small>${esc(o.continueLabel)}</small>`);
@@ -908,7 +933,7 @@ export class CampusUI implements ModalHost {
     ov.append(box);
   }
 
-  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onBoard?: (() => void) | null; boardLabel?: string; onMinis?: (() => void) | null; minisLabel?: string; onTitle: () => void }): void {
+  pause(o: { onResume: () => void; onMap: () => void; onRestart: (() => void) | null; onMissions: () => void; onGarage: (() => void) | null; onProgress: () => void; onRadioLog: () => void; onBoard?: (() => void) | null; boardLabel?: string; onMinis?: (() => void) | null; minisLabel?: string; onTitle: () => void; graphics?: GraphicsPick }): void {
     const ov = this.open('cq-overlay--pause');
     const box = el('div', 'cq-title cq-title--small', '<div class="cq-title__name">PAUSED</div>');
     const menu = el('div', 'cq-menu');
@@ -930,7 +955,9 @@ export class CampusUI implements ModalHost {
       b.onclick = fn;
       menu.append(b);
     }
-    box.append(menu, el('div', 'cq-controls show', CONTROLS));
+    box.append(menu);
+    if (o.graphics) box.append(graphicsPicker(o.graphics));
+    box.append(el('div', 'cq-controls show', CONTROLS));
     ov.append(box);
     this.keyHandler = (e) => {
       if (e.code === 'KeyM') o.onMap();
@@ -1051,7 +1078,7 @@ export class CampusUI implements ModalHost {
     const S = 1024;
     c.width = c.height = S;
     const ctx = c.getContext('2d')!;
-    this.hiMap ??= paintPlan(window.matchMedia('(pointer: coarse)').matches ? 2048 : 3072, 'map');
+    this.hiMap ??= paintPlan(window.matchMedia('(pointer: coarse)').matches ? 2048 : 3072, 'map', scanGround());
     const hi = this.hiMap;
     const src = hi.width / (WORLD_HALF * 2);
     const FULL = 700;
@@ -1334,4 +1361,35 @@ function confetti(n = 90): HTMLDivElement {
     c.append(p);
   }
   return c;
+}
+
+/** The graphics level and what picking another one does (main.ts saves it and reloads). */
+export interface GraphicsPick {
+  current: Quality;
+  onPick: (q: Quality) => void;
+}
+
+const GRAPHICS: { q: Quality; name: string; tag: string }[] = [
+  { q: 'low', name: 'Low', tag: 'Smoothest' },
+  { q: 'medium', name: 'Medium', tag: 'Balanced' },
+  { q: 'high', name: 'High', tag: 'Best looking' },
+];
+
+/** Low / Medium / High, in the story picker's style. Picking another level reloads the game. */
+function graphicsPicker(g: GraphicsPick): HTMLElement {
+  const pick = el('div', 'cq-story-pick cq-gfx-pick');
+  pick.setAttribute('role', 'radiogroup');
+  pick.setAttribute('aria-label', 'Graphics');
+  pick.append(el('div', 'cq-story-pick__label', 'Graphics · lower it if the game lags'));
+  const row = el('div', 'cq-story-pick__row');
+  for (const o of GRAPHICS) {
+    const on = o.q === g.current;
+    const b = el('button', `cq-story-pick__opt${on ? ' on' : ''}`, `<b>${o.name}</b><small>${o.tag}</small>`);
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(on));
+    if (!on) b.onclick = () => g.onPick(o.q);
+    row.append(b);
+  }
+  pick.append(row);
+  return pick;
 }

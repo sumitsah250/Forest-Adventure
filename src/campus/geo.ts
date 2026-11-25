@@ -16,10 +16,21 @@ export interface BuildingData {
   roofShape?: string;
   kind: string;
   inside: boolean;
-  /** 'ms': footprint from Microsoft's building footprints (missing from OSM). */
-  source?: 'ms';
-  /** Has a walkable interior (buildingOverrides.ts). */
+  /** 'ms': footprint from Microsoft's building footprints (missing from OSM); 'scan': found in the drone survey. */
+  source?: 'ms' | 'scan';
+  /** Height and roof measured from the drone survey (scripts/build-campus-scan.mjs). */
+  scanned?: boolean;
+  /** Pitched roofs: ridge height above the eaves (m), as surveyed. */
+  roofRise?: number;
+  /** Taller wings standing over part of the footprint: their outline and wall-top height above the floor. */
+  parts?: { pts: Pt[]; height: number }[];
+  /** Pitched roofs: gable (ridge to the ends) or hip, and a point on an off-centre ridge (x, z). */
+  roofForm?: 'gable' | 'hip';
+  roofRidge?: Pt;
+  /** false: no walkable interior (every campus building has one otherwise; buildingOverrides.ts). */
   enterable?: boolean;
+  /** What the building is for, when its name doesn't say (interiors/program.ts Use). */
+  use?: string;
 }
 
 export interface AreaData {
@@ -46,6 +57,9 @@ export interface PointData {
   x: number;
   z: number;
   name?: string;
+  /** Surveyed height and radius (water towers). */
+  h?: number;
+  r?: number;
 }
 
 export interface CampusData {
@@ -57,16 +71,24 @@ export interface CampusData {
   lines: LineData[];
   points: PointData[];
   elevation: { half: number; n: number; base: number; h: number[] };
+  /** Trees seen by the drone survey: crown position and height (m). */
+  trees?: [number, number, number][];
+  /** Poles seen by the survey along roads: x, z, height, road direction (rad), side of the road (±1). */
+  poles?: [number, number, number, number, number][];
 }
 
 export const DATA = raw as unknown as CampusData;
-DATA.buildings = clearRoads(dedupeBuildings(DATA.buildings));
+DATA.buildings = clearRoads(dedupeBuildings(DATA.buildings)).filter(
+  // A water tank mapped as a building too: the tank model (world.ts waterTower) stands there instead.
+  (b) => !(Math.abs(polyArea(b.pts)) < 150 && DATA.points.some((p) => p.kind === 'watertower' && pointInPoly(p.x, p.z, b.pts))),
+);
 for (const b of DATA.buildings) {
   const o = b.name ? BUILDING_OVERRIDES[b.name] : undefined;
   if (!o) continue;
   if (o.levels !== undefined) b.levels = o.levels;
   if (o.height !== undefined || o.levels !== undefined) b.height = o.height;
-  if (o.enterable) b.enterable = true;
+  if (o.enterable !== undefined) b.enterable = o.enterable;
+  if (o.use) b.use = o.use;
 }
 
 /**

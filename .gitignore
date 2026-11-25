@@ -6,3 +6,10 @@ test-results/
 
 # Unused personal model; kept local only.
 public/assets/models/player/me.glb
+
+# Drone survey of the campus (400 MB OBJ + 90 MB DEM): local input to scripts/build-campus-scan.mjs,
+# which commits only what it derives (campusData.json, public/assets/campus/).
+actual models/
+
+# Raw art sources (hundreds of MB of 4K textures): built into public/assets by scripts/build-player-model.mjs and scripts/build-kalki-model.mjs.
+art-source/

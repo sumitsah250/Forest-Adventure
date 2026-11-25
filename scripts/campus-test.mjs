@@ -134,7 +134,12 @@ try {
       const key = JSON.stringify(s);
       same = key === lastKey ? same + 1 : 0;
       lastKey = key;
-      if (same > 60) throw new Error(`stuck at ${key}`);
+      if (same > 60) {
+        // Where things stand, for the report: player and kart positions and a screenshot.
+        const where = await page.evaluate(() => { const c = window.__campus; const f = (v) => `(${v.x.toFixed(1)}, ${v.y.toFixed(1)}, ${v.z.toFixed(1)})`; return `player ${f(c.player.renderPos)} kart ${f(c.kart.position)} speed ${c.kart.vehicle.phys.speed.toFixed(2)}`; });
+        await shot('stuck');
+        throw new Error(`stuck at ${key}; ${where}`);
+      }
       if (s.ui === 'garage') await page.click('.cq-garage .cq-btn--primary');
       else if (s.ui === 'board') await page.click('.cq-board > .cq-btn');
       else if (s.ui === 'accuse') {
@@ -192,16 +197,31 @@ try {
         await wait(500);
       } else if (s.kind === 'drive' || s.kind === 'chase') {
         if (s.index === 1) {
-          // Real driving: steer at the next ring.
+          // Real driving: steer at the next ring. Wedged against something (a lamp post between
+          // Kalki and the ring), back off for a second with the wheel the other way, as a player would.
           await page.evaluate(() => {
             const c = window.__campus;
             const t = c.missions.targets(c.kart.position).main;
             if (!t) return;
             const p = c.kart.position;
+            const now = performance.now();
+            const ap = (window.__autopilot ??= { slowSince: now, reverseUntil: 0, steer: 0 });
             let err = Math.atan2(t.x - p.x, t.z - p.z) - c.kart.heading;
             while (err > Math.PI) err -= 2 * Math.PI;
             while (err < -Math.PI) err += 2 * Math.PI;
-            c.input.touchMove.x = Math.max(-1, Math.min(1, -err * 2.2));
+            const steer = Math.max(-1, Math.min(1, -err * 2.2));
+            if (now < ap.reverseUntil) {
+              c.input.touchMove.x = -ap.steer;
+              c.input.touchMove.y = -1;
+              ap.slowSince = now;
+              return;
+            }
+            if (Math.abs(c.kart.vehicle.phys.speed) > 0.5) ap.slowSince = now;
+            else if (now - ap.slowSince > 1200) {
+              ap.reverseUntil = now + 1000;
+              ap.steer = steer || 1;
+            }
+            c.input.touchMove.x = steer;
             c.input.touchMove.y = Math.abs(err) > 1.2 ? 0.4 : 1;
           });
           await wait(100);

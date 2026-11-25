@@ -1,0 +1,13 @@
+{
+  "duration": 32,
+  "posterAt": 1.2,
+  "shots": [
+    { "name": "arrival", "start": 0 },
+    { "name": "gate", "start": 5 },
+    { "name": "kalki", "start": 9.5 },
+    { "name": "dusk", "start": 14 },
+    { "name": "storm", "start": 18 },
+    { "name": "chase", "start": 22 },
+    { "name": "sunrise", "start": 26.5 }
+  ]
+}

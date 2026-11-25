@@ -19,8 +19,11 @@ import {
   type BuildingData, type Pt,
 } from './geo.ts';
 import { CLS, type CampusGround } from './ground.ts';
-import { classGrid, paintPlan } from './paint.ts';
-import { buildEnterable } from './interior.ts';
+import { approaches, classGrid, paintPlan } from './paint.ts';
+import { loadScanGround, scanGround } from './scanGround.ts';
+import { InteriorStreamer, buildShell, planEnterable, type EnterableBuild, type RoofInfo } from './interior.ts';
+import { Batch, palette, setInteriorPower } from './interiors/kit.ts';
+import { programFor, type Use } from './interiors/program.ts';
 import type { GateSpot } from './props.ts';
 
 export interface Entrance {
@@ -40,7 +43,13 @@ export interface CampusWorld {
   group: THREE.Group;
   /** Moves with the camera (mountains). */
   backdrop: THREE.Group;
+  /** The mountains' distance haze follows these sky colours (pass the atmosphere's own, they change in place). */
+  bindSky(horizon: THREE.Color, zenith: THREE.Color): void;
+  /** Extra haze over the whole range (0..1) on top of the distance haze: the mountains after dark (see main.ts). */
+  setBackdropHaze(extra: number): void;
   mapCanvas: HTMLCanvasElement;
+  /** Every building as built: its floor and wall-top levels (world y). */
+  footprints: { b: BuildingData; floor: number; top: number }[];
   entrances: Map<BuildingData, Entrance>;
   entranceFor(b: BuildingData, label?: string): Entrance;
   flag: THREE.Mesh | null;
@@ -54,6 +63,10 @@ export interface CampusWorld {
   setLights(power: number, night: number): void;
   /** Rain on the ground, 0..1: glossier and darker. */
   setWet(f: number): void;
+  /** Walk-in building interiors (contents built near the camera). */
+  interiors: InteriorStreamer;
+  /** (x, z) moved sideways out of any walk-in doorway's approach lane (unchanged when clear). */
+  awayFromDoors(x: number, z: number): [number, number];
 }
 
 /** Shared by every building material: one uniform write per frame, no recompiles. */
@@ -131,12 +144,13 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   // ------------------------------------------------------------------ ground
   o.progress(0.05, 'Painting the campus grounds');
   const texSize = preset.textureSize >= 1024 ? 4096 : 2048;
-  const groundCanvas = paintPlan(texSize, 'ground');
-  const clsCanvas = paintPlan(1024, 'class');
+  const scan = await loadScanGround();
+  const groundCanvas = paintPlan(texSize, 'ground', scan);
+  const clsCanvas = paintPlan(1024, 'class', scan);
   ground.cls = classGrid(clsCanvas);
   ground.clsN = 1024;
   paintBanks(groundCanvas, ground);
-  const mapCanvas = paintPlan(1024, 'map');
+  const mapCanvas = paintPlan(1024, 'map', scan);
   const groundTex = new THREE.CanvasTexture(groundCanvas);
   groundTex.colorSpace = THREE.SRGBColorSpace;
   groundTex.anisotropy = 8;
@@ -168,23 +182,41 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   const rng = mulberry32(2044);
   const footprints: { b: BuildingData; floor: number; top: number }[] = [];
   const walkIn = new Map<BuildingData, Entrance>();
-  const interiors = new THREE.Group();
-  interiors.name = 'interiors';
-  group.add(interiors);
+  const backDoors: Entrance[] = [];
+  const interiors = new InteriorStreamer(physics);
+  group.add(interiors.group);
+  // Walls, glass, floors and ceilings of every walk-in building: merged into one mesh per material.
+  const shell = new Batch();
   for (const b of DATA.buildings) {
     if (Math.abs(centroid(b.pts)[0]) > WORLD_HALF + 40 || Math.abs(centroid(b.pts)[1]) > WORLD_HALF + 40) continue;
-    if (b.enterable) {
-      const wallCol = new THREE.Color(b.wall ?? '#f3eccf');
-      const r = buildEnterable(b, ground, physics, interiors, B, wallCol);
-      if (r) {
-        footprints.push({ b, floor: r.floor, top: r.top });
-        walkIn.set(b, { ...r.entrance, building: b });
-        continue;
+    // Every campus building is walk-in (unless overridden off, or a mapped path tunnels through it).
+    const hook: WalkInHook | undefined = b.inside && b.enterable !== false
+      ? (m) => {
+        const prog = programFor(b, b.use as Use | undefined);
+        if (!prog) return null;
+        const plan = planEnterable(b, ground, prog, { levels: m.storeys, storeyH: m.storeyH, bay: m.bay, roof: m.roof, scoreOut: (x, z) => doorScore(b, ground, x, z) });
+        if (!plan) return null;
+        const r = buildShell(plan, ground, physics, B, shell, m.wall);
+        interiors.add(plan);
+        // People wait beside the door, not in the way in: 2 m to the side nearer a path.
+        const e = r.entrance;
+        const lx = -Math.cos(e.facing);
+        const lz = Math.sin(e.facing);
+        const side = [1, -1]
+          .map((sd) => ({ x: e.x + lx * 2 * sd, z: e.z + lz * 2 * sd }))
+          .sort((p, q) => doorScore(b, ground, p.x, p.z) - doorScore(b, ground, q.x, q.z))[0];
+        e.x = side.x;
+        e.z = side.z;
+        e.y = ground.heightAt(side.x, side.z);
+        walkIn.set(b, { ...e, building: b });
+        for (const e of r.extra) backDoors.push({ ...e, building: b });
+        return r;
       }
-    }
-    const info = building(b, ground, B, kit, physics, rng);
+      : undefined;
+    const info = building(b, ground, B, kit, physics, rng, hook);
     if (info) footprints.push({ b, ...info });
   }
+  shell.build(group, palette(), 'interior-shell');
   for (const [k, g] of Object.entries(B)) {
     if (!g.vertexCount) continue;
     const m = new THREE.Mesh(g.build(), mats[k as keyof typeof mats]);
@@ -210,6 +242,11 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     return e;
   };
   for (const b of DATA.buildings) if (b.inside && b.name && !/[^\x20-\x7e]/.test(b.name) && polyArea(b.pts) !== 0) entranceFor(b, signName(b.name));
+  // Walk-in buildings without a sign still need steps up to their doors.
+  for (const b of walkIn.keys()) entranceFor(b, '');
+  for (const e of backDoors) doorSteps(signGroup, e, floorOf.get(e.building)?.floor ?? e.y, physics, ground);
+  const doorLanes = [...walkIn.values(), ...backDoors];
+  DOOR_LANES = doorLanes.map((d) => ({ a: [d.doorX, d.doorZ] as Pt, b: [d.doorX + Math.sin(d.facing) * 4, d.doorZ + Math.cos(d.facing) * 4] as Pt }));
   mergeUntextured(signGroup);
 
   // ------------------------------------------------------------------ walls, gate, props
@@ -224,30 +261,53 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   standTiers(kit, ground, physics);
 
   const gate = mainGate(group, kit, ground, physics);
+  streetPoles(kit, ground, physics);
   o.progress(0.55, 'Placing benches, lamps and statues');
   let flag: THREE.Mesh | null = null;
+  const benches: Pt[] = [];
   for (const p of DATA.points) {
     if (Math.abs(p.x) > WORLD_HALF || Math.abs(p.z) > WORLD_HALF) continue;
     const y = ground.heightAt(p.x, p.z);
     switch (p.kind) {
-      case 'bench': bench(kit, p.x, y, p.z, pathAngle(p.x, p.z), physics); break;
-      case 'lamp': lamp(kit, p.x, y, p.z, physics); break;
+      case 'bench': placeBench(kit, ground, physics, p.x, p.z, benches); break;
+      case 'lamp': placeLamp(kit, ground, physics, p.x, p.z); break;
       case 'statue': statue(group, kit, p.x, y, p.z, p.name ?? '', physics); break;
       case 'fountain': fountain(kit, p.x, y, p.z, physics); break;
-      case 'flagpole': flag = flagpole(group, kit, p.x, y, p.z, physics); break;
-      case 'board': board(group, kit, p.x, y, p.z, pathAngle(p.x, p.z), physics); break;
+      case 'flagpole': {
+        const [fx, fz] = inDoorLane(p.x, p.z, 0.6) ? clearOfWays(p.x, p.z, 0.6) ?? [p.x, p.z] : [p.x, p.z];
+        flag = flagpole(group, kit, fx, ground.heightAt(fx, fz), fz, physics);
+        break;
+      }
+      case 'board': {
+        // Not in front of a walk-in doorway (moved aside like a pole if it would be).
+        const [bx, bz] = inDoorLane(p.x, p.z, 1.2) ? clearOfWays(p.x, p.z, 0.9) ?? [p.x, p.z] : [p.x, p.z];
+        board(group, kit, bx, ground.heightAt(bx, bz), bz, pathAngle(bx, bz), physics);
+        break;
+      }
       case 'bin': kit.cyl('green', 0.28, 0.8, p.x, y, p.z, 10); break;
       case 'tap': tap(kit, p.x, y, p.z); break;
-      case 'watertower': waterTower(kit, p.x, y, p.z, physics); break;
+      case 'watertower': waterTower(kit, p.x, y, p.z, physics, p.h, p.r); break;
       default: break;
     }
   }
   if (!flag) {
     // The campus flag in front of the administration block.
     const admin = DATA.points.find((q) => q.name === 'Administration Block');
-    if (admin) flag = flagpole(group, kit, admin.x + 4, ground.heightAt(admin.x + 4, admin.z - 14), admin.z - 14, physics);
+    if (admin) {
+      let [fx, fz] = [admin.x + 4, admin.z - 14];
+      // Not in the doorway of the (walk-in) block.
+      if (inDoorLane(fx, fz, 0.6)) [fx, fz] = clearOfWays(fx, fz, 0.6) ?? [fx, fz];
+      flag = flagpole(group, kit, fx, ground.heightAt(fx, fz), fz, physics);
+    }
   }
-  for (const a of DATA.areas) if (a.kind === 'pitch' || a.kind === 'ground') sports(kit, ground, physics, a.pts, (a.sport ?? '').split(';')[0], a.kind);
+  // One set of goals per field: a ground with a soccer pitch mapped inside it (the WRC Ground) leaves
+  // the goals to the pitch, whose outline is the real one; both would make two overlapping pairs.
+  const soccerPitches = DATA.areas.filter((a) => a.kind === 'pitch' && (a.sport ?? '').split(';')[0] === 'soccer');
+  for (const a of DATA.areas) {
+    if (a.kind !== 'pitch' && a.kind !== 'ground') continue;
+    if (a.kind === 'ground' && soccerPitches.some((p) => pointInPoly(...centroid(p.pts), a.pts))) continue;
+    sports(kit, ground, physics, a.pts, (a.sport ?? '').split(';')[0], a.kind);
+  }
   // Courts with ball games that fly (tennis, futsal) are fenced in chain-link, with a gate in
   // the middle of each long side so players can walk in.
   for (const a of DATA.areas) {
@@ -295,7 +355,15 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
   return {
     group,
     backdrop,
+    bindSky(horizon, zenith) {
+      BACKDROP_SKY.uHorizon.value = horizon;
+      BACKDROP_SKY.uZenith.value = zenith;
+    },
+    setBackdropHaze(extra) {
+      BACKDROP_SKY.uNightHaze.value = extra;
+    },
     mapCanvas,
+    footprints,
     entrances,
     entranceFor,
     flag,
@@ -303,6 +371,21 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     setLights(power: number, night: number) {
       LIGHTS.uPower.value = power;
       LIGHTS.uNight.value = night;
+      setInteriorPower(power);
+    },
+    interiors,
+    awayFromDoors(x: number, z: number): [number, number] {
+      for (const d of doorLanes) {
+        const fx = Math.sin(d.facing);
+        const fz = Math.cos(d.facing);
+        const along = (x - d.doorX) * fx + (z - d.doorZ) * fz;
+        const lat = (x - d.doorX) * -fz + (z - d.doorZ) * fx;
+        if (along < -0.5 || along > 4 || Math.abs(lat) >= 1.7) continue;
+        const to = (lat < 0 ? -1 : 1) * 2;
+        x += -fz * (to - lat);
+        z += fx * (to - lat);
+      }
+      return [x, z];
     },
     setWet(f: number) {
       const g = groundMat;
@@ -314,6 +397,7 @@ export async function buildCampus(o: WorldOptions): Promise<CampusWorld> {
     update(t: number, camera: THREE.Camera) {
       LIGHTS.uLitTime.value = t;
       backdrop.position.set(camera.position.x, 0, camera.position.z);
+      interiors.update(camera.position);
       updateTrees(camera);
       if (flag) {
         const pos = flag.geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -641,9 +725,33 @@ const PLINTH = new THREE.Color('#8c877c');
 const CEILING = new THREE.Color('#e8e4da');
 const HOUSE_COLOURS = ['#efe9dc', '#f2e2c4', '#e9c9b5', '#dfe6e8', '#f0d9a8', '#e8d1d8', '#d6e3cf', '#f4efe6', '#e7b98b', '#cfd8e4'];
 
+/** Builds a walk-in building's walls and inside (interior.ts) once its height and roof are known. */
+type WalkInHook = (m: { storeys: number; storeyH: number; bay: number; roof: RoofInfo; wall: THREE.Color }) => EnterableBuild | null;
+
+/** A mapped path that tunnels through the building (it keeps its passage instead of an interior). */
+function tunnelled(b: BuildingData): boolean {
+  return DATA.lines.some((l) => l.tunnel && l.pts.some((p) => pointInPoly(p[0], p[1], b.pts)));
+}
+
+/** How good a spot just outside a wall is for a walk-in building's main door (lower is better). */
+function doorScore(b: BuildingData, ground: CampusGround, x: number, z: number): number {
+  let s = nearestPathDist(x, z);
+  const other = buildingAt(x, z);
+  if (other && other !== b && pointInPoly(x, z, other.pts)) s += 100;
+  if (ground.classAt(x, z) === CLS.building) s += 50;
+  // Mapped steps meeting the wall: that is where the real door is.
+  for (const l of DATA.lines) {
+    if (l.kind !== 'steps' || l.pts.length < 2) continue;
+    for (const p of [l.pts[0], l.pts[l.pts.length - 1]]) if (Math.hypot(p[0] - x, p[1] - z) < 4) s -= 15;
+  }
+  return s;
+}
+
 function building(
-  b: BuildingData, ground: CampusGround, B: Record<'facade' | 'shop' | 'plain' | 'flat' | 'tin', GeoBuilder>, kit: Kit, physics: PhysicsWorld, rng: () => number,
+  b: BuildingData, ground: CampusGround, B: Record<'facade' | 'see' | 'shop' | 'plain' | 'flat' | 'tin', GeoBuilder>, kit: Kit, physics: PhysicsWorld, rng: () => number,
+  walkIn?: WalkInHook,
 ): { floor: number; top: number } | null {
+  if (b.kind === 'temple') return temple(b, ground, kit, physics);
   let pts = b.pts.slice();
   if (pts.length < 3) return null;
   let area = polyArea(pts);
@@ -662,7 +770,7 @@ function building(
   // The building stands on its graded platform; the ground floor is raised on a
   // plinth (campus blocks more than town houses), as hillside buildings are here.
   const pad = ground.padLevel(b) ?? gsum / pts.length;
-  const floor = pad + (b.inside ? 0.45 : 0.2);
+  let floor = pad + (b.inside ? 0.45 : 0.2);
   const y0 = Math.min(gmin, pad) - 0.6;
   const name = b.name ?? '';
   const small = area < 45;
@@ -676,14 +784,44 @@ function building(
   const workshop = b.inside && storeys === 1 && area > 60 && /workshop|lab|garage|store|power/i.test(name);
   const storeyH = b.height && b.levels ? b.height / b.levels : workshop ? 5 : STOREY;
   const height = b.height ?? storeys * storeyH;
-  const top = floor + height;
+  let top = floor + height;
   const wall = new THREE.Color(b.wall ?? (b.inside ? '#f3eccf' : HOUSE_COLOURS[Math.floor(hash2(pts[0][0] * 3, pts[0][1], 2) * HOUSE_COLOURS.length)]));
   // Slight per-building variation so a row of cream blocks does not look cloned.
   wall.offsetHSL(0, 0, (rng() - 0.5) * 0.05);
+  // Surveyed walls were photographed in shade on most sides: lift them back to their paint.
+  if (b.scanned && b.wall) wall.multiplyScalar(1.15);
   const facade = b.inside ? B.facade : B.shop;
   const bay = workshop ? 4.6 : b.inside ? 3.3 : 3.0;
   // Lit-window order (the aWind channel is free on buildings).
   const seed = glowSeed(b);
+
+  // Roof: surveyed buildings keep the roof the drone saw; the rest are guessed from their use and size.
+  const r = orientedRect(pts);
+  const rectFill = area / (4 * r.hl * r.hw);
+  const pitched = b.scanned
+    ? b.roofShape === 'pitched' && rectFill > 0.75 && r.hw > 1.5
+    : (b.roofShape === 'pitched' || workshop || (b.inside && storeys === 1 && area < 400)) && rectFill > 0.8 && r.hw > 1.5;
+
+  // A mapped path tunnelling through a block of two or more storeys keeps its passage instead.
+  if (walkIn && !(storeys >= 2 && tunnelled(b))) {
+    // Storeys tall enough to stand in (the survey measures the eaves, often low on old blocks).
+    const sH = Math.max(storeys > 1 ? 2.9 : pitched ? 2.5 : 2.8, storeyH);
+    const W = r.hw + 0.55;
+    let ridgeV = 0;
+    if (b.scanned && b.roofRidge) {
+      ridgeV = Math.max(-0.75, Math.min(0.75, (-(b.roofRidge[0] - r.cx) * Math.sin(r.angle) + (b.roofRidge[1] - r.cz) * Math.cos(r.angle)) / r.hw)) * r.hw;
+    }
+    const built = walkIn({
+      storeys, storeyH: sH, bay, wall,
+      roof: { pitched, gable: !!b.scanned && b.roofForm === 'gable', rise: b.roofRise !== undefined ? Math.min(W * 0.9, b.roofRise) : Math.min(3.2, W * 0.42), rect: r, ridgeV },
+    });
+    if (built) {
+      floor = built.floor;
+      top = built.top;
+      roofAndWings(b, B, pts, area, r, pitched, small, floor, top, storeyH, bay, seed, wall, facade, physics);
+      return { floor, top };
+    }
+  }
 
   // Walk-through passages (OSM tunnel paths under the building): an opening at
   // ground level in each wall the path crosses, plastered sides and a ceiling.
@@ -839,26 +977,253 @@ function building(
     B.plain.quad(corners[0], corners[3], corners[2], corners[1]);
   }
 
-  // Roof.
+  roofAndWings(b, B, pts, area, r, pitched, small, floor, top, storeyH, bay, seed, wall, facade, physics);
+  return { floor, top };
+}
+
+/** The roof (pitched or flat with a parapet) and any taller surveyed wings standing on it. */
+function roofAndWings(
+  b: BuildingData, B: Record<'facade' | 'see' | 'shop' | 'plain' | 'flat' | 'tin', GeoBuilder>, pts: Pt[], area: number,
+  r: ReturnType<typeof orientedRect>, pitched: boolean, small: boolean, floor: number, top: number, storeyH: number, bay: number,
+  seed: number, wall: THREE.Color, facade: GeoBuilder, physics: PhysicsWorld,
+): void {
+  void area;
   const roofCol = new THREE.Color(b.roof ?? (b.inside ? '#8a8c8c' : '#9a958c'));
-  const r = orientedRect(pts);
-  const rectFill = area / (4 * r.hl * r.hw);
-  const pitched = (b.roofShape === 'pitched' || workshop || (b.inside && storeys === 1 && area < 400)) && rectFill > 0.8 && r.hw > 1.5;
   // The roof textures are already mid-grey: a mapped colour such as "grey" (≈0.25 linear)
   // multiplied on top would read almost black from above, so lift the tint toward white.
-  roofCol.lerp(new THREE.Color(1, 1, 1), pitched ? 0.45 : 0.82);
-  if (pitched) hipRoof(B.tin, r, top, roofCol);
+  // A surveyed colour is what the roof really looks like: only the texture's own darkening is undone.
+  if (b.scanned && b.roof) roofCol.multiplyScalar(pitched ? 12 : 9.5);
+  else roofCol.lerp(new THREE.Color(1, 1, 1), pitched ? 0.45 : 0.82);
+  if (pitched) hipRoof(B.tin, r, top, roofCol, b.roofRise, b.scanned ? { gable: b.roofForm === 'gable', ridgeAt: b.roofRidge, endWall: { g: B.plain, col: wall } } : undefined);
   else {
     flatRoof(B.flat, pts, top + 0.02, roofCol);
     if (!small) parapet(B.plain, pts, top, b.inside ? 0.9 : 0.75, wall);
   }
-  if (b.kind === 'temple') {
-    // A small shikhara spire for the Saraswati temple.
-    const [cx, cz] = centroid(pts);
-    kit.cone('red', 1.4, 3.2, cx, top, cz, 4);
-    kit.cyl('gold', 0.12, 0.8, cx, top + 3.1, cz, 6);
+  // Taller wings (surveyed): walls from this roof up to the wing's own, windows continuing the storeys below.
+  for (const part of b.parts ?? []) {
+    let pp = part.pts.slice();
+    if (pp.length < 3) continue;
+    if (polyArea(pp) < 0) pp = pp.reverse();
+    const ptop = floor + part.height;
+    if (ptop < top + 0.8) continue;
+    for (let i = 0; i < pp.length; i += 1) {
+      const a = pp[i];
+      const c = pp[(i + 1) % pp.length];
+      const dx = c[0] - a[0];
+      const dz = c[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 0.05) continue;
+      const n = new THREE.Vector3(dz / len, 0, -dx / len);
+      const bays = Math.max(1, Math.round(len / bay));
+      const vb = (top - floor) / storeyH;
+      const vt = (ptop - floor) / storeyH;
+      const ia = facade.vert(new THREE.Vector3(a[0], top, a[1]), n, 0, vb, 0.92, seed, wall);
+      const ib = facade.vert(new THREE.Vector3(a[0], ptop, a[1]), n, 0, vt, 1, seed, wall);
+      const ic = facade.vert(new THREE.Vector3(c[0], ptop, c[1]), n, bays, vt, 1, seed, wall);
+      const id = facade.vert(new THREE.Vector3(c[0], top, c[1]), n, bays, vb, 0.92, seed, wall);
+      facade.quad(ia, ib, ic, id);
+      if (len > 0.3) {
+        physics.tag(physics.addBox({
+          x: (a[0] + c[0]) / 2 - (n.x * 0.25), y: (top + ptop) / 2, z: (a[1] + c[1]) / 2 - (n.z * 0.25),
+          hx: len / 2, hy: (ptop - top) / 2, hz: 0.3, rotY: Math.atan2(-dz, dx),
+        }), 'rock');
+      }
+    }
+    flatRoof(B.flat, pp, ptop + 0.02, roofCol);
+    parapet(B.plain, pp, ptop, b.inside ? 0.9 : 0.75, wall);
   }
-  return { floor, top };
+}
+
+/**
+ * The Saraswati temple as a typical small Nepali temple: a stepped brick plinth, a square brick
+ * sanctum with a whitewashed band, a carved wooden door under a gilded torana, two tiers of
+ * terracotta pagoda roof on carved struts, a gold gajur finial, and a temple bell at the steps.
+ * It faces its paved approach (paint.ts `approaches`).
+ */
+function temple(b: BuildingData, ground: CampusGround, kit: Kit, physics: PhysicsWorld): { floor: number; top: number } {
+  const r = orientedRect(b.pts);
+  const [cx, cz] = [r.cx, r.cz];
+  // The door faces the approach path: pick the side of the footprint that points most that way.
+  const app = approaches().find((l) => Math.hypot(l.pts[0][0] - cx, l.pts[0][1] - cz) < 1);
+  const want = app ? Math.atan2(app.pts[1][1] - cz, app.pts[1][0] - cx) : r.angle;
+  let best = { score: -Infinity, ang: r.angle, half: r.hl, side: r.hw };
+  for (let q = 0; q < 4; q += 1) {
+    const ang = r.angle + (q * Math.PI) / 2;
+    const score = Math.cos(ang - want);
+    if (score > best.score) best = { score, ang, half: q % 2 ? r.hw : r.hl, side: q % 2 ? r.hl : r.hw };
+  }
+  const fx = Math.cos(best.ang), fz = Math.sin(best.ang);
+  const lx = -fz, lz = fx;
+  const ry = Math.atan2(fx, fz);
+  /** World point `a` metres forward (towards the door) and `s` to the side of the centre. */
+  const at = (a: number, s: number) => [cx + fx * a + lx * s, cz + fz * a + lz * s] as const;
+  const g0 = ground.padLevel(b) ?? ground.heightAt(cx, cz);
+
+  // Plinth: three stone tiers, each set back 0.4 m, each solid at the height you see (one block to the top
+  // left you floating 0.6 m over the lower tiers).
+  const tierH = 0.3;
+  const depth = best.half * 2, width = best.side * 2;
+  for (let t = 0; t < 3; t += 1) {
+    const h = tierH + (t ? 0 : 0.4);
+    const y = g0 - (t ? 0 : 0.4) + t * tierH;
+    kit.box('stone', width - t * 0.8, h, depth - t * 0.8, cx, y, cz, ry);
+    physics.addBox({ x: cx, y: y + h / 2, z: cz, hx: (width - t * 0.8) / 2, hy: h / 2, hz: (depth - t * 0.8) / 2, rotY: ry });
+  }
+  const floor = g0 + tierH * 3;
+  // The stair: five 15 cm steps cut into the front of the plinth, from the top tier down past its foot. (Three
+  // 30 cm steps were too steep to walk up: the player could not reach the door.)
+  const rise = (floor - g0) / 6;
+  const tread = 0.3;
+  for (let i = 0; i < 5; i += 1) {
+    const top = floor - rise * (i + 1);
+    const [sx, sz] = at(best.half - 0.8 + tread * (i + 0.5), 0);
+    kit.box('stone', 1.8, top - g0 + 0.2, tread, sx, g0 - 0.2, sz, ry);
+    physics.addBox({ x: sx, y: (top + g0 - 0.2) / 2, z: sz, hx: 0.9, hy: (top - g0 + 0.2) / 2, hz: tread / 2, rotY: ry });
+  }
+
+  // Sanctum: a square brick cella towards the back, door to the front.
+  const s = Math.max(2.4, Math.min(4, Math.min(width, depth) - 1.9));
+  const back = Math.max(0, best.half - 0.8 - s / 2) * 0.5;
+  const [scx, scz] = at(-back, 0);
+  const wallH = 2.5;
+  // Hollow: four brick walls with a real doorway in the front one, so you can walk in to the goddess.
+  const tw = 0.3; // wall thickness
+  const dw = 1.1; // doorway width
+  const dh = 2.0; // doorway height
+  const inner = s - tw * 2;
+  const wall = (a: number, side: number, w: number, d: number, y0: number, h: number) => {
+    const [wx, wz] = at(-back + a, side);
+    kit.box('brick', w, h, d, wx, y0, wz, ry);
+    physics.addBox({ x: wx, y: y0 + h / 2, z: wz, hx: w / 2, hy: h / 2, hz: d / 2, rotY: ry });
+  };
+  wall(-s / 2 + tw / 2, 0, s, tw, floor, wallH); // back
+  for (const side of [-1, 1]) wall(0, side * (s / 2 - tw / 2), tw, inner, floor, wallH); // sides
+  const jamb = (s - dw) / 2;
+  for (const side of [-1, 1]) wall(s / 2 - tw / 2, side * (dw / 2 + jamb / 2), jamb, tw, floor, wallH); // front, beside the door
+  wall(s / 2 - tw / 2, 0, dw, tw, floor + dh, wallH - dh); // over the door
+  // Whitewashed band round the outside, a stone floor and a dark timber ceiling inside.
+  for (const q of [0, 1, 2, 3]) {
+    const yaw = ry + (q * Math.PI) / 2;
+    const nx = Math.sin(yaw), nz = Math.cos(yaw);
+    kit.box('white', s + 0.06, 0.28, 0.04, scx + nx * (s / 2 + 0.01), floor + wallH - 0.5, scz + nz * (s / 2 + 0.01), yaw);
+  }
+  kit.box('stone', inner, 0.03, inner, scx, floor, scz, ry);
+  kit.box('wood', inner, 0.1, inner, scx, floor + wallH - 0.1, scz, ry);
+  // Door: a carved wooden frame round the opening, a gilded torana over it.
+  for (const side of [-1, 1]) kit.box('wood', 0.12, dh, tw + 0.06, ...at(-back + s / 2 - tw / 2, side * (dw / 2 + 0.06)), floor, ry);
+  kit.box('wood', dw + 0.36, 0.14, tw + 0.06, ...at(-back + s / 2 - tw / 2, 0), floor + dh, ry);
+  saraswati(kit, physics, (a, side) => at(-back + a, side), floor, ry, inner, s / 2 - tw);
+  // The torana: a gilded half-disc standing over the door (a half cylinder turned to face forward, arch up).
+  const [tx, tz] = at(-back + s / 2 + 0.09, 0);
+  kit.add('gold', new THREE.CylinderGeometry(0.75, 0.75, 0.06, 18, 1, false, -Math.PI / 2, Math.PI), tx, floor + 2.05, tz, ry, -Math.PI / 2);
+
+  // Roof tier 1: a broad pyramid on struts, eaves well past the walls.
+  const roof1 = floor + wallH;
+  const eave1 = s / 2 + 0.9;
+  kit.add('tile', new THREE.ConeGeometry(eave1 * Math.SQRT2, 1.25, 4, 1).translate(0, 0.62, 0), scx, roof1, scz, ry + Math.PI / 4);
+  // Carved struts (tunala): three on each face, leaning out from the wall to hold the eaves.
+  for (let q = 0; q < 4; q += 1) {
+    const yaw = ry + (q * Math.PI) / 2;
+    const nx = Math.sin(yaw), nz = Math.cos(yaw);
+    for (const t of [-0.35 * s, 0, 0.35 * s]) {
+      const px = scx + nx * (s / 2 + 0.25) + Math.cos(yaw) * t;
+      const pz = scz + nz * (s / 2 + 0.25) - Math.sin(yaw) * t;
+      kit.add('wood', new THREE.BoxGeometry(0.1, 1.0, 0.12), px, roof1 - 0.45, pz, yaw, 0.55);
+    }
+  }
+  // Upper drum and roof tier 2.
+  const drum = s * 0.5;
+  const roof1Top = roof1 + 0.75;
+  kit.box('brick', drum, 0.8, drum, scx, roof1Top, scz, ry);
+  const roof2 = roof1Top + 0.8;
+  kit.add('tile', new THREE.ConeGeometry((drum / 2 + 0.6) * Math.SQRT2, 0.95, 4, 1).translate(0, 0.47, 0), scx, roof2, scz, ry + Math.PI / 4);
+  // Gajur: a gold finial of stacked bell, ball and spike.
+  const peak = roof2 + 0.85;
+  kit.cyl('gold', 0.16, 0.25, scx, peak, scz, 10, 0.08);
+  kit.add('gold', new THREE.SphereGeometry(0.17, 10, 8), scx, peak + 0.42, scz);
+  kit.add('gold', new THREE.ConeGeometry(0.07, 0.45, 8).translate(0, 0.22, 0), scx, peak + 0.55, scz);
+
+  // Temple bell on a wooden frame over the stair, high enough to walk under (you ring it on the way up).
+  for (const side of [-1, 1]) {
+    const [px, pz] = at(best.half + 0.2, side * 1.25);
+    kit.box('wood', 0.12, 2.8, 0.12, px, g0, pz, ry);
+  }
+  const [bx, bz] = at(best.half + 0.2, 0);
+  kit.box('wood', 2.6, 0.12, 0.14, bx, g0 + 2.8, bz, ry);
+  kit.add('gold', new THREE.CylinderGeometry(0.09, 0.2, 0.32, 12).translate(0, -0.16, 0), bx, g0 + 2.75, bz);
+  return { floor, top: peak + 1 };
+}
+
+/**
+ * Goddess Saraswati inside the temple: a white marble murti seated on a red lotus, on a stone slab
+ * table against the back wall, facing the door. Gold crown, halo and necklace; the veena across her
+ * lap (her front hands play it); the back hands raised with a book and a mala; two butter lamps lit
+ * on the slab. `at(a, side)` is a point `a` metres towards the door from the sanctum's centre;
+ * `half` is the inner half-depth (centre to the inside of the back wall).
+ */
+function saraswati(
+  kit: Kit, physics: PhysicsWorld, at: (a: number, side: number) => readonly [number, number],
+  floor: number, ry: number, inner: number, half: number,
+): void {
+  // The slab: a dressed stone table, a red cloth over it.
+  const slabW = Math.min(1.6, inner - 0.3);
+  const slabD = 0.7;
+  const slabH = 0.75;
+  const slabA = -half + slabD / 2 + 0.05;
+  const [sx, sz] = at(slabA, 0);
+  kit.box('stone', slabW, slabH - 0.08, slabD - 0.1, sx, floor, sz, ry);
+  kit.box('stone', slabW + 0.08, 0.08, slabD + 0.04, sx, floor + slabH - 0.08, sz, ry);
+  kit.box('red', slabW - 0.1, 0.02, slabD - 0.08, sx, floor + slabH, sz, ry);
+  kit.box('red', slabW - 0.1, 0.36, 0.02, ...at(slabA + slabD / 2 - 0.02, 0), floor + slabH - 0.36, ry);
+  physics.addBox({ x: sx, y: floor + slabH / 2, z: sz, hx: slabW / 2 + 0.04, hy: slabH / 2, hz: slabD / 2 + 0.02, rotY: ry });
+
+  // The murti, built from her lotus up. P(a, side, h): forward, across (her left is +side), height.
+  const y0 = floor + slabH + 0.02;
+  const base = slabA - 0.04;
+  const P = (a: number, side: number) => at(base + a, side);
+  const put = (mat: KitMat, g: THREE.BufferGeometry, a: number, side: number, h: number, rx = 0, rz = 0) => {
+    const [x, z] = P(a, side);
+    kit.add(mat, g, x, y0 + h, z, ry, rx, rz);
+  };
+  // Lotus: a red cushion ringed with petals.
+  put('red', new THREE.CylinderGeometry(0.3, 0.26, 0.1, 16), 0, 0, 0.05);
+  for (let i = 0; i < 12; i += 1) {
+    const t = (i / 12) * Math.PI * 2;
+    put('red', new THREE.ConeGeometry(0.06, 0.16, 6), Math.cos(t) * 0.28, Math.sin(t) * 0.28, 0.1, Math.cos(t) * 0.5, Math.sin(t) * 0.5);
+  }
+  // Seated: sari falling over crossed legs, then the body, shoulders, neck and head.
+  put('white', new THREE.CylinderGeometry(0.17, 0.3, 0.2, 16), 0, 0, 0.2);
+  put('white', new THREE.BoxGeometry(0.5, 0.12, 0.34), 0.06, 0, 0.16);
+  put('white', new THREE.CylinderGeometry(0.12, 0.15, 0.34, 12), -0.02, 0, 0.45);
+  put('white', new THREE.BoxGeometry(0.3, 0.07, 0.15), -0.02, 0, 0.6);
+  put('white', new THREE.CylinderGeometry(0.035, 0.04, 0.07, 8), -0.02, 0, 0.66);
+  put('white', new THREE.SphereGeometry(0.085, 14, 10), -0.01, 0, 0.75);
+  // Painted black hair: over the crown of the head and falling down her back.
+  put('metal', new THREE.SphereGeometry(0.09, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(1, 1, 1.05), -0.025, 0, 0.765);
+  put('metal', new THREE.BoxGeometry(0.15, 0.3, 0.04), -0.1, 0, 0.58);
+  // Crown, halo behind the head, necklace.
+  put('gold', new THREE.CylinderGeometry(0.05, 0.075, 0.07, 10), -0.015, 0, 0.84);
+  put('gold', new THREE.ConeGeometry(0.035, 0.1, 8), -0.015, 0, 0.92);
+  put('gold', new THREE.TorusGeometry(0.17, 0.014, 6, 28), -0.1, 0, 0.76);
+  put('gold', new THREE.TorusGeometry(0.075, 0.011, 6, 18), 0.0, 0, 0.6, Math.PI / 2);
+  // Front arms reaching for the veena, back arms raised beside the halo.
+  for (const side of [-1, 1]) {
+    put('white', new THREE.CylinderGeometry(0.03, 0.035, 0.24, 8), 0.03, side * 0.17, 0.48, -0.5, side * 0.35);
+    put('white', new THREE.CylinderGeometry(0.025, 0.03, 0.24, 8), -0.05, side * 0.2, 0.68, -0.2, side * 0.45);
+  }
+  // Veena across the lap: a long neck from the big gourd at her right knee up past her left shoulder.
+  put('wood', new THREE.SphereGeometry(0.09, 12, 10), 0.16, -0.2, 0.24);
+  put('wood', new THREE.SphereGeometry(0.06, 10, 8), 0.14, 0.24, 0.62);
+  put('wood', new THREE.CylinderGeometry(0.022, 0.022, 0.62, 8), 0.15, 0.02, 0.43, 0, 0.83);
+  // A book (the Vedas) and a mala in the raised hands.
+  put('red', new THREE.BoxGeometry(0.06, 0.09, 0.03), -0.02, -0.3, 0.8);
+  put('gold', new THREE.TorusGeometry(0.04, 0.008, 4, 14), -0.02, 0.3, 0.8);
+  // Butter lamps lit on the slab's front corners.
+  for (const side of [-1, 1]) {
+    const [lx, lz] = at(slabA + slabD / 2 - 0.1, side * (slabW / 2 - 0.12));
+    kit.cyl('gold', 0.05, 0.04, lx, floor + slabH + 0.02, lz, 10, 0.035);
+    kit.add('light', new THREE.ConeGeometry(0.014, 0.05, 6), lx, floor + slabH + 0.085, lz);
+  }
 }
 
 function flatRoof(g: GeoBuilder, pts: Pt[], y: number, col: THREE.Color): void {
@@ -889,32 +1254,61 @@ function parapet(g: GeoBuilder, pts: Pt[], top: number, h: number, col: THREE.Co
   }
 }
 
-function hipRoof(g: GeoBuilder, r: ReturnType<typeof orientedRect>, top: number, col: THREE.Color): void {
+/**
+ * A pitched roof over the building's oriented rectangle, eaves at `top` with a 0.55 m overhang.
+ * Hip (falls on all four sides) or gable (the ridge runs to the ends, closed by triangular end walls).
+ * Surveyed roofs give the rise and, when off centre, a point on the ridge line (world x, z).
+ */
+function hipRoof(
+  g: GeoBuilder, r: ReturnType<typeof orientedRect>, top: number, col: THREE.Color,
+  surveyed?: number, opts?: { gable?: boolean; ridgeAt?: Pt; endWall?: { g: GeoBuilder; col: THREE.Color } },
+): void {
   const L = r.hl + 0.55;
   const W = r.hw + 0.55;
-  const rise = Math.min(3.2, W * 0.42);
-  const ridge = Math.max(0, L - W);
+  const rise = surveyed !== undefined ? Math.min(W * 0.9, surveyed) : Math.min(3.2, W * 0.42);
+  const gable = !!opts?.gable;
+  const ridge = gable ? L : Math.max(0, L - W);
   const ca = Math.cos(r.angle);
   const sa = Math.sin(r.angle);
+  // Ridge across the width: where the survey saw it, else down the middle.
+  let v0 = 0;
+  if (opts?.ridgeAt) v0 = Math.max(-0.75, Math.min(0.75, (-(opts.ridgeAt[0] - r.cx) * sa + (opts.ridgeAt[1] - r.cz) * ca) / r.hw)) * r.hw;
   const P = (u: number, v: number, h: number) => new THREE.Vector3(r.cx + u * ca - v * sa, top + h, r.cz + u * sa + v * ca);
   const c00 = P(-L, -W, 0), c10 = P(L, -W, 0), c11 = P(L, W, 0), c01 = P(-L, W, 0);
-  const r0 = P(-ridge, 0, rise), r1 = P(ridge, 0, rise);
-  const face = (ps: THREE.Vector3[], uvs: [number, number][]) => {
+  const r0 = P(-ridge, v0, rise), r1 = P(ridge, v0, rise);
+  const face = (ps: THREE.Vector3[], uvs: [number, number][], into = g, c = col) => {
     const n = new THREE.Vector3().subVectors(ps[1], ps[0]).cross(new THREE.Vector3().subVectors(ps[2], ps[0])).normalize();
     let order = ps.map((_, i) => i);
     if (n.y < 0) {
       n.negate();
       order = order.reverse();
     }
-    const ids = order.map((i) => g.vert(ps[i], n, uvs[i][0], uvs[i][1], 1, 0, col));
-    if (ids.length === 3) g.tri(ids[0], ids[1], ids[2]);
-    else g.quad(ids[0], ids[1], ids[2], ids[3]);
+    const ids = order.map((i) => into.vert(ps[i], n, uvs[i][0], uvs[i][1], 1, 0, c));
+    if (ids.length === 3) into.tri(ids[0], ids[1], ids[2]);
+    else into.quad(ids[0], ids[1], ids[2], ids[3]);
   };
-  const slope = Math.hypot(W, rise) / 1.5;
-  face([c00, c10, r1, r0], [[-L / 1.5, 0], [L / 1.5, 0], [ridge / 1.5, slope], [-ridge / 1.5, slope]]);
-  face([c11, c01, r0, r1], [[L / 1.5, 0], [-L / 1.5, 0], [-ridge / 1.5, slope], [ridge / 1.5, slope]]);
-  face([c10, c11, r1], [[-W / 1.5, 0], [W / 1.5, 0], [0, slope]]);
-  face([c01, c00, r0], [[-W / 1.5, 0], [W / 1.5, 0], [0, slope]]);
+  const sA = Math.hypot(W + v0, rise) / 1.5;
+  const sB = Math.hypot(W - v0, rise) / 1.5;
+  face([c00, c10, r1, r0], [[-L / 1.5, 0], [L / 1.5, 0], [ridge / 1.5, sA], [-ridge / 1.5, sA]]);
+  face([c11, c01, r0, r1], [[L / 1.5, 0], [-L / 1.5, 0], [-ridge / 1.5, sB], [ridge / 1.5, sB]]);
+  if (!gable) {
+    face([c10, c11, r1], [[-W / 1.5, 0], [W / 1.5, 0], [0, Math.max(sA, sB)]]);
+    face([c01, c00, r0], [[-W / 1.5, 0], [W / 1.5, 0], [0, Math.max(sA, sB)]]);
+    return;
+  }
+  // Gable ends: vertical triangles over the end walls, in the wall's colour.
+  const ew = opts?.endWall;
+  if (!ew) return;
+  for (const s of [-1, 1]) {
+    const u = s * r.hl;
+    const a = P(u, -r.hw, 0), b = P(u, r.hw, 0);
+    // Roof height above the wall line at the apex (the eaves overhang slightly below it).
+    const apex = P(u, v0, rise);
+    const n = new THREE.Vector3(ca * s, 0, sa * s);
+    const ids = [a, b, apex].map((p, i) => ew.g.vert(p, n, i === 2 ? (v0 + r.hw) / 3 : i === 0 ? 0 : (2 * r.hw) / 3, i === 2 ? rise / 3 : 0, 1, 0, ew.col));
+    ew.g.tri(ids[0], ids[1], ids[2]);
+    ew.g.tri(ids[0], ids[2], ids[1]);
+  }
 }
 
 /** Picks the wall that faces the nearest path, and the spot in front of it. */
@@ -1147,8 +1541,8 @@ function grandStairs(group: THREE.Group, e: Entrance, floor: number, physics: Ph
     m.receiveShadow = true;
     group.add(m);
   }
-  // People wait on the porch beside the door, not halfway down the steps.
-  const [ex, ez] = P(porch * 0.55, 0);
+  // People wait on the porch to one side of the door, not halfway down the steps or in the way in.
+  const [ex, ez] = P(porch * 0.55, lat1 - 0.45);
   e.x = ex;
   e.z = ez;
   e.y = floor;
@@ -1195,7 +1589,7 @@ function doorSteps(group: THREE.Group, e: Entrance, floor: number, physics: Phys
 
 // ==================================================================== kit: merged primitives
 
-type KitMat = 'stone' | 'concrete' | 'metal' | 'white' | 'wood' | 'green' | 'bronze' | 'water' | 'red' | 'gold' | 'tank' | 'net' | 'light' | 'brick' | 'blue';
+type KitMat = 'stone' | 'concrete' | 'metal' | 'white' | 'wood' | 'green' | 'bronze' | 'water' | 'red' | 'gold' | 'tank' | 'net' | 'light' | 'brick' | 'blue' | 'tile';
 
 const KIT_COLOURS: Record<KitMat, { color: string; roughness: number; metalness?: number; emissive?: string; transparent?: boolean; opacity?: number }> = {
   stone: { color: '#8f8a80', roughness: 0.92 },
@@ -1213,6 +1607,8 @@ const KIT_COLOURS: Record<KitMat, { color: string; roughness: number; metalness?
   light: { color: '#fff6dc', roughness: 0.4, emissive: '#5a5240' },
   brick: { color: '#9a5a44', roughness: 0.9 },
   blue: { color: '#2d5b9a', roughness: 0.6 },
+  // Terracotta roof tiles (the temple).
+  tile: { color: '#4a2a20', roughness: 0.85 },
 };
 
 class Kit {
@@ -1281,11 +1677,212 @@ function bench(kit: Kit, x: number, y: number, z: number, ry: number, physics: P
   physics.addBox({ x, y: y + 0.3, z, hx: 0.9, hy: 0.3, hz: 0.25, rotY: ry });
 }
 
-function lamp(kit: Kit, x: number, y: number, z: number, physics: PhysicsWorld): void {
+/** A campus lamp post; the arm reaches the way `dir` (radians, world x→z) points: over its road or path. */
+function lamp(kit: Kit, x: number, y: number, z: number, physics: PhysicsWorld, dir = 0): void {
+  const cx = Math.cos(dir), cz = Math.sin(dir);
   kit.cyl('metal', 0.07, 5.2, x, y, z, 8, 0.05);
-  kit.box('metal', 0.9, 0.06, 0.08, x + 0.4, y + 5.1, z);
-  kit.box('light', 0.4, 0.12, 0.22, x + 0.8, y + 4.98, z);
+  kit.box('metal', 0.9, 0.06, 0.08, x + cx * 0.4, y + 5.1, z + cz * 0.4, -dir);
+  kit.box('light', 0.4, 0.12, 0.22, x + cx * 0.8, y + 4.98, z + cz * 0.8, -dir);
   physics.addCylinder(x, y, z, 1.5, 0.1);
+}
+
+/** Nearest mapped line of the given kinds to (x, z): distance, half width, the closest point and the unit normal towards (x, z). */
+function nearestLine(x: number, z: number, kinds: RegExp): { d: number; half: number; px: number; pz: number; nx: number; nz: number } | null {
+  let best: { d: number; half: number; px: number; pz: number; nx: number; nz: number } | null = null;
+  for (const l of DATA.lines) {
+    if (!kinds.test(l.kind) || l.area || l.pts.length < 2) continue;
+    for (let i = 0; i < l.pts.length - 1; i += 1) {
+      const r = segDist(x, z, l.pts[i], l.pts[i + 1]);
+      if (best && r.d >= best.d) continue;
+      let nx = x - r.px, nz = z - r.pz;
+      const len = Math.hypot(nx, nz);
+      if (len > 1e-3) { nx /= len; nz /= len; } else {
+        // On the centre line: either side of the segment.
+        const a = l.pts[i], b = l.pts[i + 1];
+        const sl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        nx = (b[1] - a[1]) / sl; nz = -(b[0] - a[0]) / sl;
+      }
+      best = { d: r.d, half: l.w / 2, px: r.px, pz: r.pz, nx, nz };
+    }
+  }
+  return best;
+}
+
+const ROAD_KINDS = /^(primary|secondary|tertiary|residential|unclassified|service|living_street|track)$/;
+const WALK_KINDS = /^(footway|path|pedestrian|steps)$/;
+
+/**
+ * Where a post of radius `r` near (x, z) can stand clear of every carriageway and paved path
+ * (paths count at least 1.8 m wide, as paint.ts paves them). Moving a post off its nearest road
+ * can land it in a crossing road or the footway beside it, where Kalki or the player runs into
+ * it, so each step pushes it out of whichever way it stands deepest in. Null if it is still
+ * inside one after a few pushes (a tight junction): better no post than one in the way.
+ */
+/** Walk-in doorways: from the door to 4 m out (set once the doors are known). */
+let DOOR_LANES: { a: Pt; b: Pt }[] = [];
+
+/** Within `r` of a walk-in doorway's way in. */
+function inDoorLane(x: number, z: number, r: number): boolean {
+  return DOOR_LANES.some((d) => segDist(x, z, d.a, d.b).d < 1.4 + r);
+}
+
+function clearOfWays(x: number, z: number, r: number): Pt | null {
+  for (let k = 0; k < 5; k += 1) {
+    let worst: { inside: number; px: number; pz: number; half: number; a: Pt; b: Pt } | null = null;
+    // The way in to every walk-in doorway counts as a path.
+    for (const d of DOOR_LANES) {
+      const s = segDist(x, z, d.a, d.b);
+      const inside = 1.4 + r - s.d;
+      if (inside > 0 && (!worst || inside > worst.inside)) worst = { inside, px: s.px, pz: s.pz, half: 1.4, a: d.a, b: d.b };
+    }
+    for (const l of DATA.lines) {
+      if (l.area || l.pts.length < 2) continue;
+      const road = ROAD_KINDS.test(l.kind);
+      if (!road && !WALK_KINDS.test(l.kind)) continue;
+      const half = road ? l.w / 2 : Math.max(0.9, l.w / 2);
+      for (let i = 0; i < l.pts.length - 1; i += 1) {
+        const s = segDist(x, z, l.pts[i], l.pts[i + 1]);
+        const inside = half + r - s.d;
+        if (inside > 0 && (!worst || inside > worst.inside)) worst = { inside, px: s.px, pz: s.pz, half, a: l.pts[i], b: l.pts[i + 1] };
+      }
+    }
+    if (!worst) return [x, z];
+    let nx = x - worst.px, nz = z - worst.pz;
+    const len = Math.hypot(nx, nz);
+    if (len > 1e-3) { nx /= len; nz /= len; } else {
+      const sl = Math.hypot(worst.b[0] - worst.a[0], worst.b[1] - worst.a[1]) || 1;
+      nx = (worst.b[1] - worst.a[1]) / sl; nz = -(worst.b[0] - worst.a[0]) / sl;
+    }
+    x = worst.px + nx * (worst.half + r + 0.05);
+    z = worst.pz + nz * (worst.half + r + 0.05);
+  }
+  return null;
+}
+
+/**
+ * A mapped bench, set the way a campus sets them: beside the nearest path (or road), its back to
+ * the grass, its seat facing the walkway and its length along it. The mapped points are rough (many
+ * land on the path itself, at odd angles, or in clumps), so a bench within 3 m of one already placed
+ * is dropped, as is one that would end up in a building or on a road.
+ */
+function placeBench(kit: Kit, ground: CampusGround, physics: PhysicsWorld, x: number, z: number, placed: Pt[]): void {
+  const walk = nearestLine(x, z, WALK_KINDS);
+  const road = nearestLine(x, z, ROAD_KINDS);
+  const l = walk && walk.d < walk.half + 6 ? { ...walk, half: Math.max(0.9, walk.half) } : road && road.d < road.half + 5 ? { ...road, half: road.half + 1.2 } : null;
+  let ry = pathAngle(x, z);
+  if (l) {
+    // Back edge 0.3 m off the path edge (the seat is 0.45 m deep, centred 0.55 m out).
+    x = l.px + l.nx * (l.half + 0.55);
+    z = l.pz + l.nz * (l.half + 0.55);
+    ry = Math.atan2(-l.nx, -l.nz);
+  } else {
+    // Out in the open (beside a pitch, under trees): stay put, but face the nearest way people walk.
+    const any = walk && road ? (walk.d - walk.half < road.d - road.half ? walk : road) : walk ?? road;
+    if (any) ry = Math.atan2(-any.nx, -any.nz);
+  }
+  if (placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 3)) return;
+  if (buildingAt(x, z) || inDoorLane(x, z, 1.2)) return;
+  const onRoad = nearestLine(x, z, ROAD_KINDS);
+  if (onRoad && onRoad.d < onRoad.half + 0.4) return;
+  placed.push([x, z]);
+  bench(kit, x, ground.heightAt(x, z), z, ry, physics);
+}
+
+/**
+ * A mapped campus lamp, set at the edge of the road or path it lights (the map points often sit in
+ * the carriageway) with its arm over it. Skipped where the survey found a pole within 8 m.
+ */
+function placeLamp(kit: Kit, ground: CampusGround, physics: PhysicsWorld, x: number, z: number): void {
+  if ((DATA.poles ?? []).some((p) => Math.hypot(p[0] - x, p[1] - z) < 8)) return;
+  const road = nearestLine(x, z, ROAD_KINDS);
+  const path = nearestLine(x, z, /^(footway|path|pedestrian)$/);
+  // Paths are paved at least 1.8 m wide (paint.ts), whatever the map says.
+  const l = road && road.d < road.half + 4 ? { ...road, gap: 0.7 } : path && path.d < Math.max(0.9, path.half) + 3 ? { ...path, half: Math.max(0.9, path.half), gap: 0.45 } : null;
+  if (l) {
+    x = l.px + l.nx * (l.half + l.gap);
+    z = l.pz + l.nz * (l.half + l.gap);
+  }
+  // The arm still reaches over the way it was set beside.
+  const dir = l ? Math.atan2(-l.nz, -l.nx) : 0;
+  const spot = clearOfWays(x, z, 0.15);
+  if (!spot || buildingAt(spot[0], spot[1])) return;
+  lamp(kit, spot[0], ground.heightAt(spot[0], spot[1]), spot[1], physics, dir);
+}
+
+/**
+ * Electricity poles along the roads, where the survey saw them: Nepal's tapered square concrete
+ * poles with a crossarm and three pin insulators, a galvanised street-light arm out over the road,
+ * and the three conductors strung to the next pole along the same road (with sag).
+ */
+function streetPoles(kit: Kit, ground: CampusGround, physics: PhysicsWorld): void {
+  const poles = (DATA.poles ?? []).filter(([x, z]) => Math.abs(x) < WORLD_HALF && Math.abs(z) < WORLD_HALF);
+  const tops: { x: number; z: number; y: number; ux: number; uz: number; ang: number }[] = [];
+  for (const [px0, pz0, sh, ang, side] of poles) {
+    let x = px0, z = pz0;
+    // Road normal (x, z) on the pole's side; the arm reaches back over the carriageway.
+    let nx = Math.sin(ang) * side, nz = -Math.cos(ang) * side;
+    // Survey points can land in the carriageway or on a footpath: stand the pole just off the edge.
+    const road = nearestLine(x, z, ROAD_KINDS);
+    if (road && road.d < road.half + 0.6) {
+      x = road.px + road.nx * (road.half + 0.6);
+      z = road.pz + road.nz * (road.half + 0.6);
+      nx = road.nx;
+      nz = road.nz;
+    }
+    // Off the footway too, and out of any road that put it back in (a junction).
+    const spot = clearOfWays(x, z, 0.25);
+    if (!spot || buildingAt(spot[0], spot[1])) continue;
+    [x, z] = spot;
+    const y = ground.heightAt(x, z);
+    const h = Math.max(7.5, Math.min(11, sh));
+    const ax = -nx, az = -nz;
+    kit.cyl('concrete', 0.14, h, x, y, z, 4, 0.08);
+    physics.addCylinder(x, y, z, h / 2, 0.16);
+    // Crossarm along the road, three insulators.
+    const ux = Math.cos(ang), uz = Math.sin(ang);
+    const top = y + h - 0.35;
+    kit.box('metal', 1.6, 0.08, 0.08, x, top, z, -ang);
+    for (const s of [-0.7, 0, 0.7]) kit.cyl('white', 0.05, 0.16, x + ux * s, top + 0.08, z + uz * s, 6);
+    tops.push({ x, z, y: top + 0.24, ux, uz, ang });
+    // Street light: a galvanised arm 1.6 m out over the road, LED head.
+    const ly = y + h * 0.72;
+    const armDir = Math.atan2(az, ax);
+    kit.box('metal', 1.6, 0.06, 0.06, x + ax * 0.8, ly, z + az * 0.8, -armDir);
+    kit.box('light', 0.5, 0.1, 0.24, x + ax * 1.55, ly - 0.08, z + az * 1.55, -armDir);
+  }
+  // Conductors: each pole to its nearest neighbour further along the same line of poles (15–55 m).
+  for (const a of tops) {
+    let best: (typeof tops)[number] | null = null;
+    let bd = 55;
+    for (const b of tops) {
+      if (b === a) continue;
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 15 || d >= bd) continue;
+      // Forward along the road, and roughly in line with it.
+      const along = (dx * a.ux + dz * a.uz) / d;
+      if (along < 0.85) continue;
+      bd = d;
+      best = b;
+    }
+    if (!best) continue;
+    for (const s of [-0.7, 0, 0.7]) {
+      const p0 = new THREE.Vector3(a.x + a.ux * s, a.y, a.z + a.uz * s);
+      const p1 = new THREE.Vector3(best.x + best.ux * s, best.y, best.z + best.uz * s);
+      const segs = 6;
+      const sag = bd * 0.012;
+      let prev = p0;
+      for (let k = 1; k <= segs; k += 1) {
+        const t = k / segs;
+        const p = new THREE.Vector3().lerpVectors(p0, p1, t);
+        p.y -= sag * 4 * t * (1 - t);
+        const dx = p.x - prev.x, dy = p.y - prev.y, dz = p.z - prev.z;
+        const run = Math.hypot(dx, dz);
+        kit.add('metal', new THREE.BoxGeometry(Math.hypot(run, dy), 0.02, 0.02), (p.x + prev.x) / 2, (p.y + prev.y) / 2, (p.z + prev.z) / 2, Math.atan2(-dz, dx), 0, Math.atan2(dy, run));
+        prev = p;
+      }
+    }
+  }
 }
 
 function statue(group: THREE.Group, kit: Kit, x: number, y: number, z: number, name: string, physics: PhysicsWorld): void {
@@ -1411,11 +2008,74 @@ function tap(kit: Kit, x: number, y: number, z: number): void {
   kit.box('metal', 0.2, 0.04, 0.04, x + 0.08, y + 0.95, z);
 }
 
-function waterTower(kit: Kit, x: number, y: number, z: number, physics: PhysicsWorld): void {
-  for (const [dx, dz] of [[-1.5, -1.5], [1.5, -1.5], [1.5, 1.5], [-1.5, 1.5]]) kit.box('concrete', 0.35, 9, 0.35, x + dx, y, z + dz);
-  kit.cyl('concrete', 2.6, 3.6, x, y + 9, z, 20);
-  kit.cone('concrete', 2.7, 0.8, x, y + 12.6, z, 20);
-  physics.addCylinder(x, y, z, 6, 2.6);
+/**
+ * An overhead water tank as they are built in Nepal: a reinforced-concrete Intze tank (conical bottom,
+ * cylindrical wall, shallow dome) on a staging of eight columns tied by ring beams every few metres,
+ * a walkway with railings round the foot of the tank, a steel ladder up one column and the supply
+ * pipe down the middle. Height and tank radius as surveyed (default: the campus tank, 20 m by 4 m).
+ */
+function waterTower(kit: Kit, x: number, y: number, z: number, physics: PhysicsWorld, height = 20.4, radius = 4): void {
+  const R = Math.max(2.5, radius);
+  const dome = 1.2;
+  const wall = Math.max(3, Math.min(5, R));
+  const cone = 1.4;
+  const stage = Math.max(6, height - dome - wall - cone);
+  const rc = R * 0.7;
+  const cols = 8;
+  const colAt = (k: number) => {
+    const a = (k / cols) * Math.PI * 2;
+    return { x: x + Math.cos(a) * rc, z: z + Math.sin(a) * rc, a };
+  };
+  // Footings and columns.
+  for (let k = 0; k < cols; k += 1) {
+    const c = colAt(k);
+    kit.box('stone', 1.0, 0.35, 1.0, c.x, y - 0.2, c.z, -c.a);
+    kit.box('concrete', 0.45, stage, 0.45, c.x, y, c.z, -c.a);
+    physics.addCylinder(c.x, y, c.z, stage / 2, 0.3);
+  }
+  // Ring beams tying the columns, every ~3.5 m, and a deeper ring girder under the tank.
+  const chord = 2 * rc * Math.sin(Math.PI / cols);
+  const rings = Math.max(2, Math.round(stage / 3.5));
+  for (let r = 1; r <= rings; r += 1) {
+    const top = r === rings;
+    const ly = y + (stage * r) / rings - (top ? 0.7 : 0.4);
+    for (let k = 0; k < cols; k += 1) {
+      const a = ((k + 0.5) / cols) * Math.PI * 2;
+      const mx = x + Math.cos(a) * rc * Math.cos(Math.PI / cols);
+      const mz = z + Math.sin(a) * rc * Math.cos(Math.PI / cols);
+      kit.box('concrete', 0.3, top ? 0.7 : 0.4, chord, mx, ly, mz, -a);
+    }
+  }
+  const base = y + stage;
+  // Intze tank: conical bottom out to the wall, the wall, a painted band, and a shallow dome.
+  kit.add('concrete', new THREE.CylinderGeometry(R, rc + 0.25, cone, 28), x, base + cone / 2, z);
+  kit.add('concrete', new THREE.CylinderGeometry(R, R, wall, 28), x, base + cone + wall / 2, z);
+  kit.add('blue', new THREE.CylinderGeometry(R + 0.02, R + 0.02, 0.55, 28, 1, true), x, base + cone + wall * 0.62, z);
+  kit.add('white', new THREE.CylinderGeometry(R + 0.03, R + 0.03, 0.12, 28, 1, true), x, base + cone + wall * 0.62 + 0.36, z);
+  const capR = (R * R + dome * dome) / (2 * dome);
+  kit.add('concrete', new THREE.SphereGeometry(capR, 28, 6, 0, Math.PI * 2, 0, Math.asin(R / capR)), x, base + cone + wall + dome - capR, z);
+  // Manhole and vent on the dome.
+  kit.box('concrete', 0.8, 0.35, 0.8, x + R * 0.35, base + cone + wall + dome * 0.8, z);
+  kit.cyl('metal', 0.08, 0.9, x - R * 0.3, base + cone + wall + dome * 0.75, z, 8);
+  // Walkway round the foot of the tank, with railings.
+  const walkR = R + 0.75;
+  kit.add('concrete', new THREE.CylinderGeometry(walkR, walkR, 0.15, 32), x, base + cone - 0.05, z);
+  const posts = Math.round((Math.PI * 2 * walkR) / 1.3);
+  for (let k = 0; k < posts; k += 1) {
+    const a = (k / posts) * Math.PI * 2;
+    kit.cyl('metal', 0.025, 1.0, x + Math.cos(a) * (walkR - 0.08), base + cone + 0.02, z + Math.sin(a) * (walkR - 0.08), 5);
+  }
+  for (const ry of [0.5, 1.0]) kit.add('metal', new THREE.TorusGeometry(walkR - 0.08, 0.025, 4, 48), x, base + cone + ry, z, 0, Math.PI / 2);
+  // Steel ladder on the outside of one column, up to the walkway.
+  const lc = colAt(0);
+  const ox = Math.cos(lc.a), oz = Math.sin(lc.a);
+  const tx = -oz, tz = ox;
+  const lx = lc.x + ox * 0.45, lz = lc.z + oz * 0.45;
+  const ladderTop = base + cone + 1.0;
+  for (const s of [-0.22, 0.22]) kit.cyl('metal', 0.025, ladderTop - y - 0.3, lx + tx * s, y + 0.3, lz + tz * s, 5);
+  for (let ry = y + 0.6; ry < ladderTop - 0.2; ry += 0.3) kit.box('metal', 0.03, 0.03, 0.44, lx, ry, lz, Math.atan2(-tz, tx) + Math.PI / 2);
+  // Supply pipe down the middle.
+  kit.cyl('metal', 0.12, stage + cone, x, y, z, 10);
 }
 
 function sports(kit: Kit, ground: CampusGround, physics: PhysicsWorld, pts: Pt[], sport: string, kind: string): void {
@@ -1558,6 +2218,8 @@ function stairs(kit: Kit, ground: CampusGround, pts: Pt[], width: number): void 
     return ground.heightAt(p.x, p.z);
   };
   const drop = h(len) - h(0);
+  // Only where the ground really steps: on level ground the mapped line is a path, not a stair block.
+  if (Math.abs(drop) < 0.6) return;
   const n = Math.max(2, Math.min(Math.floor(len / 0.28), Math.round(Math.abs(drop) / 0.16)));
   const w = Math.max(1.4, width * 0.85);
   for (let k = 0; k < n; k += 1) {
@@ -1794,16 +2456,56 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
   // Road direction ang; pillars sit either side, across it.
   const px = -Math.sin(ang);
   const pz = Math.cos(ang);
-  const span = 4.6;
+  // Half the clear opening between the main pillars, and the pillar centres just outside it.
+  const open = 4.4;
+  const span = open + 0.7;
   const y = ground.heightAt(gx, gz);
-  for (const s of [-1, 1]) {
-    const x = gx + px * span * s;
-    const z = gz + pz * span * s;
-    kit.box('brick', 1.1, 5.6, 1.1, x, y - 0.4, z, -ang);
-    kit.box('white', 1.4, 0.25, 1.4, x, y + 5.2, z, -ang);
-    physics.addBox({ x, y: y + 2.4, z, hx: 0.55, hy: 2.8, hz: 0.55, rotY: -ang });
+  const ry = -ang;
+  const P = (u: number) => [gx + px * u, gz + pz * u] as const;
+  /** A two-tier pagoda cap (square roofs turned to the gate) with a gold pinnacle, as on Nepali gateways. */
+  const pagoda = (x: number, z: number, base: number, w: number) => {
+    kit.box('white', w + 0.3, 0.22, w + 0.3, x, base, z, ry);
+    kit.add('red', new THREE.ConeGeometry(w * 0.95, w * 0.42, 4), x, base + 0.22 + w * 0.21, z, ry + Math.PI / 4);
+    kit.box('white', w * 0.5, w * 0.3, w * 0.5, x, base + 0.22 + w * 0.36, z, ry);
+    kit.add('red', new THREE.ConeGeometry(w * 0.6, w * 0.34, 4), x, base + 0.22 + w * 0.66 + w * 0.17, z, ry + Math.PI / 4);
+    kit.cyl('gold', 0.06, w * 0.35, x, base + 0.22 + w * 0.98, z, 8);
+    kit.add('gold', new THREE.SphereGeometry(0.11, 10, 8), x, base + 0.22 + w * 0.98 + w * 0.35, z);
+  };
+  /** A plastered pillar on a stone plinth, with brick bands and a moulded cap. */
+  const pillar = (u: number, w: number, h: number) => {
+    const [x, z] = P(u);
+    kit.box('stone', w + 0.3, 0.6, w + 0.3, x, y - 0.3, z, ry);
+    kit.box('white', w, h - 0.3, w, x, y + 0.3, z, ry);
+    for (const t of [0.35, 0.72]) kit.box('brick', w + 0.04, 0.22, w + 0.04, x, y + h * t, z, ry);
+    kit.box('white', w + 0.16, 0.18, w + 0.16, x, y + h - 0.18, z, ry);
+    physics.addBox({ x, y: y + h / 2, z, hx: w / 2, hy: h / 2, hz: w / 2, rotY: ry });
+    pagoda(x, z, y + h, w);
+  };
+  // Main pillars, 6.2 m.
+  for (const s of [-1, 1]) pillar(s * span, 1.4, 6.2);
+  // Name board between them, clear of lorries (4.1 m), with a maroon backing frame.
+  const boardY = y + 4.75;
+  kit.box('red', 0.32, 1.55, open * 2 + 0.2, gx, boardY - 0.78, gz, ry);
+  // Segmental arch over the board, springing from the pillars.
+  const arcN = 12;
+  const rise = 0.9;
+  const halfL = open + 0.1;
+  const rad = (halfL * halfL + rise * rise) / (2 * rise);
+  const yc = y + 5.55 + rise - rad;
+  let prev: [number, number] | null = null;
+  for (let k = 0; k <= arcN; k += 1) {
+    const u = -halfL + (2 * halfL * k) / arcN;
+    const ay = yc + Math.sqrt(rad * rad - u * u);
+    if (prev) {
+      const [u0, y0] = prev;
+      const len = Math.hypot(u - u0, ay - y0);
+      const [mx, mz] = P((u + u0) / 2);
+      // Local x runs across the road (the pillar axis), tilted to follow the arc.
+      kit.add('white', new THREE.BoxGeometry(len + 0.05, 0.42, 0.62), mx, (ay + y0) / 2 + 0.21, mz, Math.atan2(-pz, px), 0, Math.atan2(ay - y0, u - u0));
+      kit.add('brick', new THREE.BoxGeometry(len + 0.05, 0.12, 0.66), mx, (ay + y0) / 2 + 0.48, mz, Math.atan2(-pz, px), 0, Math.atan2(ay - y0, u - u0));
+    }
+    prev = [u, ay];
   }
-  kit.box('brick', 0.7, 1.3, span * 2 + 1.1, gx, y + 4.0, gz, -ang);
   const tex = signTexture(
     [
       { text: 'त्रिभुवन विश्वविद्यालय · इन्जिनियरिङ अध्ययन संस्थान', size: 34, color: '#f2d27a', gap: 10 },
@@ -1813,21 +2515,47 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
     { w: 1400, h: 230, bg: '#7a1f1f', border: '#f2d27a' },
   );
   for (const side of [1, -1]) {
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(span * 2 + 0.8, 1.2), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(open * 2 - 0.1, 1.3), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 }));
     const nx = Math.cos(ang) * side;
     const nz = Math.sin(ang) * side;
-    sign.position.set(gx + nx * 0.37, y + 4.65, gz + nz * 0.37);
+    sign.position.set(gx + nx * 0.17, boardY, gz + nz * 0.17);
     sign.rotation.y = Math.atan2(nx, nz);
     group.add(sign);
+  }
+  // Pedestrian gates either side: 1.5 m openings, smaller pillars outside them, a lintel over each.
+  const walkOuter = span + 0.7 + 1.5 + 0.45;
+  for (const s of [-1, 1]) {
+    pillar(s * walkOuter, 0.9, 3.4);
+    const [lx, lz] = P(s * (span + 0.7 + 0.75));
+    kit.box('white', 0.45, 0.4, 1.6, lx, y + 2.55, lz, ry);
+    kit.box('brick', 0.5, 0.12, 1.7, lx, y + 2.95, lz, ry);
   }
   // Which way along the road is into campus (towards the middle of the map).
   const into = Math.cos(ang) * -gx + Math.sin(ang) * -gz >= 0 ? 1 : -1;
   const rx = Math.cos(ang) * into;
   const rz = Math.sin(ang) * into;
 
+  // Inside the gate: a guard booth to one side, and the boundary wall running off both ways from the
+  // pedestrian gates.
+  {
+    const [bx, bz] = P(walkOuter + 3);
+    const cx = bx + rx * 4.5, cz = bz + rz * 4.5;
+    const by = ground.heightAt(cx, cz);
+    kit.box('white', 2.6, 2.6, 2.6, cx, by, cz, ry);
+    kit.box('concrete', 3.3, 0.16, 3.3, cx, by + 2.6, cz, ry);
+    kit.box('metal', 1.4, 0.9, 2.64, cx, by + 1.15, cz, ry);
+    kit.box('wood', 0.9, 2.0, 2.66, cx + px * 0.5, by, cz + pz * 0.5, ry);
+    physics.addBox({ x: cx, y: by + 1.3, z: cz, hx: 1.3, hy: 1.3, hz: 1.3, rotY: ry });
+    for (const s of [-1, 1]) {
+      const a = P(s * (walkOuter + 0.45));
+      const b = P(s * (walkOuter + 10));
+      linearBarrier(kit, ground, physics, [[a[0], a[1]], [b[0], b[1]]], 'wall');
+    }
+  }
+
   // Two iron leaves, hinged on the inner faces of the pillars. Each is one merged mesh in a
   // pivot group, so swinging it is a single rotation.
-  const hinge = span - 0.55;
+  const hinge = open;
   const leafW = hinge - 0.04;
   const leafH = 2.7;
   const parts: THREE.BufferGeometry[] = [];
@@ -1838,6 +2566,9 @@ function mainGate(group: THREE.Group, kit: Kit, ground: CampusGround, physics: P
   rod(0.12, leafH, 0.1, 0.06, leafH / 2);
   rod(0.12, leafH, 0.1, leafW - 0.06, leafH / 2);
   for (let x = 0.3; x < leafW - 0.15; x += 0.21) rod(0.035, leafH - 0.25, 0.035, x, leafH / 2 + 0.03);
+  // Spear tips over the bars and a solid sheet along the bottom, as on Nepali steel gates.
+  for (let x = 0.3; x < leafW - 0.15; x += 0.21) parts.push(new THREE.ConeGeometry(0.05, 0.2, 4).translate(x, leafH + 0.1, 0));
+  rod(leafW - 0.1, 0.75, 0.03, leafW / 2, 0.62);
   const leafGeo = mergeGeometries(parts)!;
   for (const p of parts) p.dispose();
   const iron = new THREE.MeshStandardMaterial({ color: '#25282b', metalness: 0.75, roughness: 0.42 });
@@ -1910,8 +2641,56 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
     return true;
   };
   const broad = () => Math.floor(rng() * 5);
+  // Where the drone surveyed, the trees are the ones it saw (DATA.trees: crown position and height);
+  // the planting below fills in only beyond the survey.
+  const scan = scanGround();
+  const surveyed = (x: number, z: number) => {
+    if (!DATA.trees || !scan?.surface) return false;
+    const i = Math.round(x + WORLD_HALF), j = Math.round(z + WORLD_HALF);
+    return i >= 0 && j >= 0 && i < scan.n && j < scan.n && scan.surface[j * scan.n + i] !== 0;
+  };
+  const MODEL_H = [11, 14, 9, 16, 12, 17, 21];
+  // The survey sees crowns: one over a path, road or roof belongs to a trunk standing beside it,
+  // not in the walkway (where the player and Kalki ran into it). Footpaths are classed as paving
+  // like the yards (where trees do stand), so they are tested against their own lines, paved at
+  // least 1.8 m wide as paint.ts lays them.
+  const walkSegs: { a: Pt; b: Pt; half: number }[] = [];
+  for (const l of [...DATA.lines, ...approaches()]) {
+    if (l.area || l.pts.length < 2 || !WALK_KINDS.test(l.kind)) continue;
+    for (let i = 0; i < l.pts.length - 1; i += 1) walkSegs.push({ a: l.pts[i], b: l.pts[i + 1], half: Math.max(1.8, l.w) / 2 });
+  }
+  const trunkOk = (x: number, z: number) => {
+    for (const [dx, dz] of [[0, 0], [0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]]) {
+      const c = ground.classAt(x + dx, z + dz);
+      if (c === CLS.building || c === CLS.road || c === CLS.path) return false;
+    }
+    return !walkSegs.some((s) => segDist(x, z, s.a, s.b).d < s.half + 0.45) && !DOOR_LANES.some((d) => segDist(x, z, d.a, d.b).d < 1.4 + 0.45);
+  };
+  for (const [sx, sz, h] of DATA.trees ?? []) {
+    let x = sx, z = sz;
+    if (!trunkOk(x, z)) {
+      let found = false;
+      for (let rad = 0.75; rad <= 3 && !found; rad += 0.75) {
+        for (let k = 0; k < 12; k += 1) {
+          const a = (k / 12) * Math.PI * 2;
+          if (trunkOk(sx + Math.cos(a) * rad, sz + Math.sin(a) * rad)) {
+            x = sx + Math.cos(a) * rad;
+            z = sz + Math.sin(a) * rad;
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found) continue;
+    }
+    // The broadleaf model nearest in height, scaled to the surveyed height; a tall narrow crown is a pine.
+    let m = 0;
+    for (let k = 1; k < 5; k += 1) if (Math.abs(MODEL_H[k] - h) < Math.abs(MODEL_H[m] - h)) m = k;
+    if (h > 15 && rng() < 0.35) m = h > 19 ? 6 : 5;
+    trees.push({ x, z, m, s: Math.min(1.6, Math.max(0.35, h / MODEL_H[m])) });
+  }
   // Mapped trees.
-  for (const p of DATA.points) if (p.kind === 'tree' && clear(p.x, p.z, 0.8)) trees.push({ x: p.x, z: p.z, m: broad(), s: range(rng, 0.85, 1.2) });
+  for (const p of DATA.points) if (p.kind === 'tree' && !surveyed(p.x, p.z) && clear(p.x, p.z, 0.8)) trees.push({ x: p.x, z: p.z, m: broad(), s: range(rng, 0.85, 1.2) });
   const density = preset.vegetationDensity;
   // Parks, lawns and the orchard.
   for (const a of DATA.areas) {
@@ -1926,6 +2705,7 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
       const x = rect.cx + u * Math.cos(rect.angle) - v * Math.sin(rect.angle);
       const z = rect.cz + u * Math.sin(rect.angle) + v * Math.cos(rect.angle);
       if (!pointInPoly(x, z, a.pts) || !clear(x, z, 2.5)) continue;
+      if (surveyed(x, z) && a.kind !== 'scrub' && !(a.kind === 'park' && rng() < 0.4)) continue;
       if (a.kind === 'scrub' || (a.kind === 'park' && rng() < 0.4)) shrubs.push({ x, z, m: Math.floor(rng() * bushes.length), s: range(rng, 0.8, 1.4) });
       else trees.push({ x, z, m: a.kind === 'orchard' ? 2 : broad(), s: range(rng, a.kind === 'orchard' ? 0.55 : 0.8, a.kind === 'orchard' ? 0.75 : 1.25) });
       if ((i + 1) / 3 >= n) break;
@@ -1947,7 +2727,7 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
       const d = Math.hypot(dx, dz);
       x += (dx / d) * 4;
       z += (dz / d) * 4;
-      if (clear(x, z, 2.5) && rng() < 0.75) trees.push({ x, z, m: rng() < 0.25 ? 5 + Math.floor(rng() * 2) : broad(), s: range(rng, 0.9, 1.3) });
+      if (!surveyed(x, z) && clear(x, z, 2.5) && rng() < 0.75) trees.push({ x, z, m: rng() < 0.25 ? 5 + Math.floor(rng() * 2) : broad(), s: range(rng, 0.9, 1.3) });
     }
   }
   // Shrubs at the foot of campus buildings.
@@ -1978,7 +2758,7 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
   for (let i = 0; i < outsideN * 4 && trees.length < 5000; i += 1) {
     const x = range(rng, -WORLD_HALF + 5, WORLD_HALF - 5);
     const z = range(rng, -WORLD_HALF + 5, WORLD_HALF - 5);
-    if (pointInPoly(x, z, ring)) continue;
+    if (pointInPoly(x, z, ring) || surveyed(x, z)) continue;
     // Clumped: keep candidates where a coarse noise field is high.
     if (hash2(Math.floor(x / 35), Math.floor(z / 35), 9) < 0.45) continue;
     if (!clear(x, z, 3)) continue;
@@ -2104,89 +2884,243 @@ function plantTrees(group: THREE.Group, o: WorldOptions, ground: CampusGround, p
 
 // ==================================================================== mountains
 
+/** Sky colours the mountains fade into with distance (bound to the live atmosphere by bindSky). */
+const BACKDROP_SKY = { uHorizon: { value: new THREE.Color('#c9d6de') }, uZenith: { value: new THREE.Color('#3c78c2') }, uNightHaze: { value: 0 } };
+
+/** GLSL-style smoothstep: works with the edges either way round (three's returns 0 when edge0 > edge1). */
+function sstep(x: number, e0: number, e1: number): number {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Smooth value noise, 0..1. */
+function vnoise(x: number, z: number, seed: number): number {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const a = hash2(ix, iz, seed);
+  const b = hash2(ix + 1, iz, seed);
+  const c = hash2(ix, iz + 1, seed);
+  const d = hash2(ix + 1, iz + 1, seed);
+  return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
+}
+
+/** Fractal noise, 0..1. */
+function fbm(x: number, z: number, seed: number, octaves = 5): number {
+  let s = 0;
+  let a = 0.5;
+  let n = 0;
+  for (let i = 0; i < octaves; i += 1) {
+    s += a * vnoise(x, z, seed + i);
+    n += a;
+    x = x * 2.03 + 17.1;
+    z = z * 2.03 + 5.3;
+    a *= 0.5;
+  }
+  return s / n;
+}
+
+/** Ridged multifractal, about 0..1: knife-edge crests, with fine detail only on the crests (as erosion leaves it). */
+function ridged(x: number, z: number, seed: number, octaves = 6): number {
+  let s = 0;
+  let a = 0.5;
+  let w = 1;
+  let n = 0;
+  for (let i = 0; i < octaves; i += 1) {
+    let r = 1 - Math.abs(vnoise(x, z, seed + i) * 2 - 1);
+    r *= r * w;
+    w = Math.min(1, r * 1.8);
+    s += a * r;
+    n += a;
+    x = x * 2.1 + 3.7;
+    z = z * 2.1 + 9.1;
+    a *= 0.5;
+  }
+  return s / n;
+}
+
 /**
- * The view north from Lamachaur: green foothills, then the snow wall of the Annapurna
- * range with the fishtail summit of Machhapuchhre almost due north-north-east. Drawn as a
- * camera-centred ring inside the sky dome, with its own aerial-perspective colouring.
+ * A heightfield ring around the camera: columns by bearing (degrees clockwise from north),
+ * rows by radius. The nearest row drops to y −40 so no gap shows under it. `paint` gets each
+ * vertex's height and upward normal and returns its distance haze (0..1).
+ */
+function ringField(
+  from: number, to: number, step: number, r0: number, r1: number, rows: number,
+  height: (deg: number, r: number) => number,
+  paint: (deg: number, r: number, y: number, ny: number, out: THREE.Color) => number,
+): THREE.BufferGeometry {
+  const cols = Math.round((to - from) / step) + 1;
+  const pos = new Float32Array(cols * (rows + 1) * 3);
+  for (let i = 0; i < cols; i += 1) {
+    const deg = from + i * step;
+    const a = (deg * Math.PI) / 180;
+    for (let j = 0; j <= rows; j += 1) {
+      const r = r0 + ((r1 - r0) * j) / rows;
+      const k = (i * (rows + 1) + j) * 3;
+      // North is −z; bearings run clockwise (east = +x).
+      pos[k] = Math.sin(a) * r;
+      pos[k + 1] = j === 0 ? -40 : height(deg, r);
+      pos[k + 2] = -Math.cos(a) * r;
+    }
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < cols - 1; i += 1) {
+    for (let j = 0; j < rows; j += 1) {
+      const a = i * (rows + 1) + j;
+      const b = a + rows + 1;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
+  const col = new Float32Array(pos.length);
+  const haze = new Float32Array(pos.length / 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < cols; i += 1) {
+    const deg = from + i * step;
+    for (let j = 0; j <= rows; j += 1) {
+      const v = i * (rows + 1) + j;
+      const r = r0 + ((r1 - r0) * j) / rows;
+      haze[v] = paint(deg, r, pos[v * 3 + 1], nrm.getY(v), c);
+      col[v * 3] = c.r;
+      col[v * 3 + 1] = c.g;
+      col[v * 3 + 2] = c.b;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('haze', new THREE.BufferAttribute(haze, 1));
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), r1 + 50);
+  return geo;
+}
+
+/**
+ * The view north from Lamachaur: forested foothills, then the snow wall of the Annapurna
+ * range with the fishtail summit of Machhapuchhre almost due north-north-east. Real terrain
+ * (ridged spurs, gullies, snow that slides off the steep faces), lit by the game's own sun
+ * and sky light so it darkens at dusk and goes silver under the moon, and faded into the sky
+ * colour with distance. A camera-centred ring inside the sky dome; sizes are metres at about
+ * 940 m, so the angles match the real view.
  */
 function mountains(): THREE.Group {
   const g = new THREE.Group();
   g.name = 'backdrop';
-  // Bearings are degrees clockwise from north; heights are metres at radius R (angle ≈ h / R).
-  const R = 940;
   const peaks: { b: number; h: number; w: number; sharp?: number }[] = [
-    { b: -62, h: 150, w: 10 }, // Dhaulagiri, far to the west-north-west
-    { b: -38, h: 140, w: 9 },
-    { b: -18, h: 168, w: 7 }, // Annapurna South
-    { b: -11, h: 150, w: 6 }, // Hiunchuli
-    { b: -2, h: 178, w: 7 }, // Annapurna I behind
-    { b: 9, h: 205, w: 3.2, sharp: 2.4 }, // Machhapuchhre
-    { b: 12, h: 190, w: 2.4, sharp: 2.4 }, // its second "fish tail" summit
-    { b: 24, h: 172, w: 8 }, // Annapurna IV / II
-    { b: 34, h: 182, w: 7 },
-    { b: 52, h: 150, w: 9 }, // Lamjung Himal
-    { b: 72, h: 140, w: 10 }, // Manaslu, faint in the east
+    { b: -62, h: 150, w: 7 }, // Dhaulagiri, far to the west-north-west
+    { b: -40, h: 138, w: 6 },
+    { b: -19, h: 172, w: 5 }, // Annapurna South
+    { b: -11, h: 152, w: 4 }, // Hiunchuli
+    { b: -3, h: 180, w: 5 }, // Annapurna I behind
+    { b: 9, h: 208, w: 2.6, sharp: 1.15 }, // Machhapuchhre
+    { b: 11.6, h: 194, w: 1.8, sharp: 1.15 }, // its second "fish tail" summit
+    { b: 24, h: 174, w: 5 }, // Annapurna IV / II
+    { b: 34, h: 184, w: 4.5 },
+    { b: 52, h: 152, w: 6 }, // Lamjung Himal
+    { b: 72, h: 142, w: 7 }, // Manaslu, faint in the east
   ];
-  const ridge = (deg: number) => {
+  // Summit line: the named peaks over a continuous saw-toothed wall that sinks at the ends.
+  const crest = (deg: number) => {
     let h = 0;
-    for (const p of peaks) {
-      const d = Math.abs(deg - p.b) / p.w;
-      h = Math.max(h, p.h * Math.exp(-Math.pow(d, p.sharp ?? 1.4)));
-    }
-    const rough = Math.sin(deg * 1.7) * 6 + Math.sin(deg * 4.3 + 1) * 4 + Math.sin(deg * 9.1) * 2.5;
-    return Math.max(0, h + rough * (h / 180));
+    for (const p of peaks) h = Math.max(h, p.h * Math.exp(-Math.pow(Math.abs(deg - p.b) / p.w, p.sharp ?? 1.5)));
+    const wall = (96 + 34 * fbm(deg * 0.09, 0.5, 31, 3) + 16 * ridged(deg * 0.2, 1.5, 33, 3)) * sstep(Math.abs(deg), 98, 66);
+    return Math.max(h, wall);
   };
-  const foot = (deg: number) => 52 + Math.sin(deg * 0.09 + 0.6) * 16 + Math.sin(deg * 0.31) * 8 + Math.sin(deg * 1.1) * 3;
-
-  const strip = (fn: (deg: number) => number, radius: number, rows: number, colour: (t: number, h: number, deg: number) => THREE.Color, from: number, to: number, step: number) => {
-    const cols = Math.round((to - from) / step) + 1;
-    const pos: number[] = [];
-    const cl: number[] = [];
-    const idx: number[] = [];
-    for (let i = 0; i < cols; i += 1) {
-      const deg = from + i * step;
-      const a = (deg * Math.PI) / 180;
-      const top = fn(deg);
-      for (let j = 0; j <= rows; j += 1) {
-        const t = j / rows;
-        const y = -40 + (top + 40) * t;
-        // North is -z; bearings run clockwise (east = +x).
-        pos.push(Math.sin(a) * radius, y, -Math.cos(a) * radius);
-        const c = colour(t, top, deg);
-        cl.push(c.r, c.g, c.b);
-      }
-    }
-    for (let i = 0; i < cols - 1; i += 1) {
-      for (let j = 0; j < rows; j += 1) {
-        const a = i * (rows + 1) + j;
-        const b = a + rows + 1;
-        idx.push(a, b, a + 1, a + 1, b, b + 1);
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
-    geo.setIndex(idx);
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide }));
-    m.frustumCulled = false;
-    return m;
+  const H0 = 700;
+  const HC = 925;
+  const H1 = 990;
+  const himalHeight = (deg: number, r: number) => {
+    const top = crest(deg);
+    const u = (deg * Math.PI) / 180 * 940;
+    const v = Math.min(1, (r - H0) / (HC - H0));
+    // Rising face toward the crest, falling gently behind it.
+    const p = r <= HC ? Math.pow(sstep(v, 0, 1), 1.7) : 1 - 0.35 * ((r - HC) / (H1 - HC));
+    // Spurs and gullies running down toward the viewer (noise stretched along the radius).
+    const face = Math.pow(Math.sin(Math.PI * Math.min(v, 1)), 0.6);
+    const fine = (ridged(u / 16, r / 16, 51, 3) - 0.3) * 9 * p;
+    return Math.max(0, top * p + top * 0.55 * (spurAt(u, r) - 0.3) * face + fine);
   };
-  const haze = new THREE.Color('#b9c8d3');
-  const snow = new THREE.Color('#f4f6fa');
-  const rock = new THREE.Color('#7f8a99');
-  const himal = strip(ridge, R, 14, (t, h, deg) => {
-    const y = -40 + (h + 40) * t;
-    const snowLine = 70 + Math.sin(deg * 2.3) * 10;
-    const c = rock.clone().lerp(snow, THREE.MathUtils.smoothstep(y, snowLine - 10, snowLine + 25));
-    // Shadowed couloirs on the west faces.
-    const shade = 0.88 + 0.12 * Math.sin(deg * 6.1 + t * 3);
-    c.multiplyScalar(shade);
-    return c.lerp(haze, 0.35 + (1 - t) * 0.35);
-  }, -90, 90, 0.5);
+  const spurAt = (u: number, r: number) => ridged(u / 40, r / 80, 41);
+  const snow = new THREE.Color('#eef2f8');
+  const rockA = new THREE.Color('#4a4a4c');
+  const rockB = new THREE.Color('#67635e');
+  const forest = new THREE.Color('#2b3a26');
+  const tmp = new THREE.Color();
+  const himal = new THREE.Mesh(
+    ringField(-100, 100, 0.25, H0, H1, 56, himalHeight, (deg, r, y, ny, out) => {
+      const u = (deg * Math.PI) / 180 * 940;
+      out.copy(rockA).lerp(rockB, fbm(u / 20, r / 20, 61, 3));
+      out.lerp(forest, sstep(y, 52, 28));
+      // Snow above the snow line, except on faces too steep to hold it (steeper allowed up high).
+      const line = 66 + 16 * (fbm(u / 60, 0.3, 71, 3) - 0.5);
+      const steep = 0.4 - 0.22 * sstep(y, 110, 180);
+      // Bare rock ribs along the spur crests, snow filling the gullies between them.
+      const rib = sstep(spurAt(u, r), 0.34, 0.5) * sstep(ny, 0.85, 0.55) * sstep(y, 200, 150);
+      const s = sstep(y, line - 6, line + 14) * sstep(ny, steep - 0.12, steep + 0.08) * (1 - 0.6 * rib);
+      out.lerp(tmp.copy(snow).multiplyScalar(0.9 + 0.1 * vnoise(u / 6, r / 6, 81)), s);
+      // Thinner air higher up: the summits stand out crisper than their feet.
+      return 0.44 - 0.3 * sstep(y, 30, 190) + 0.12 * sstep(Math.abs(deg), 40, 95);
+    }),
+    mountainMaterial(),
+  );
   himal.renderOrder = -2;
+  himal.frustumCulled = false;
   g.add(himal);
-  const hills = strip(foot, R - 30, 4, (t) => new THREE.Color('#3f5a3a').lerp(new THREE.Color('#7f9a8c'), 0.45 - t * 0.2), -180, 180, 2);
+
+  // Forested foothills all round (the Pokhara valley rim), two or three ridges deep.
+  const F0 = 590;
+  const F1 = 810;
+  const hillHeight = (deg: number, r: number) => {
+    const u = (deg * Math.PI) / 180 * 800;
+    const v = (r - F0) / (F1 - F0);
+    // Lower to the north so the Himalaya shows over them; the valley's far rim to the south.
+    const north = 1 - 0.35 * sstep(Math.cos((deg * Math.PI) / 180), 0.3, 0.9);
+    const body = 18 + 62 * fbm(u / 240, r / 110, 91, 4);
+    const crests = 16 * ridged(u / 80, r / 45, 101, 4);
+    // Rises from the valley and falls away again behind (no sunlit plateau at the back).
+    return (body + crests) * north * sstep(v, 0, 0.35) * sstep(v, 1, 0.7);
+  };
+  const dark = new THREE.Color('#203320');
+  const green = new THREE.Color('#34492a');
+  const field = new THREE.Color('#6b7445');
+  const hills = new THREE.Mesh(
+    ringField(-180, 180, 0.5, F0, F1, 26, hillHeight, (deg, r, y, ny, out) => {
+      const u = (deg * Math.PI) / 180 * 800;
+      out.copy(dark).lerp(green, fbm(u / 30, r / 30, 111, 3));
+      // Terraced fields on the gentler, lower slopes.
+      const terr = sstep(fbm(u / 70, r / 50, 121, 3), 0.52, 0.62) * sstep(ny, 0.8, 0.92) * sstep(y, 55, 25);
+      out.lerp(field, terr * 0.8);
+      return 0.2 + 0.32 * ((r - F0) / (F1 - F0));
+    }),
+    mountainMaterial(),
+  );
   hills.renderOrder = -1;
+  hills.frustumCulled = false;
   g.add(hills);
   return g;
+}
+
+let mountainMat: THREE.MeshStandardMaterial | null = null;
+
+/** Lit by the scene's sun and sky light; the per-vertex `haze` fades it toward the sky near the horizon. */
+function mountainMaterial(): THREE.MeshStandardMaterial {
+  if (mountainMat) return mountainMat;
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, fog: false });
+  m.onBeforeCompile = (s) => {
+    s.uniforms.uHorizon = BACKDROP_SKY.uHorizon;
+    s.uniforms.uZenith = BACKDROP_SKY.uZenith;
+    s.uniforms.uNightHaze = BACKDROP_SKY.uNightHaze;
+    s.vertexShader = s.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float haze;\nvarying float vHaze;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHaze = haze;');
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uHorizon;\nuniform vec3 uZenith;\nuniform float uNightHaze;\nvarying float vHaze;')
+      .replace('#include <opaque_fragment>', '#include <opaque_fragment>\nfloat hz = clamp(vHaze, 0.0, 1.0);\nhz += (1.0 - hz) * uNightHaze;\ngl_FragColor.rgb = mix(gl_FragColor.rgb, mix(uHorizon, uZenith, 0.16), hz);');
+  };
+  mountainMat = m;
+  return m;
 }

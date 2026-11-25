@@ -119,7 +119,8 @@ export function detectQuality(): Quality {
     const ext = gl.getExtension('WEBGL_debug_renderer_info');
     const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     gl.getExtension('WEBGL_lose_context')?.loseContext();
-    if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|radeon\(tm\) graphics|vega \d|swiftshader|llvmpipe/i.test(name)) return 'low';
+    // Entry-level laptop GeForce (MX350, GT 1030...) is slower than the Iris Xe it is often paired with.
+    if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|radeon\(tm\) graphics|vega \d|swiftshader|llvmpipe|geforce (mx|gt) ?\d|quadro (p|t)\d{3}\b/i.test(name)) return 'low';
     return 'medium';
   } catch {
     return 'medium';

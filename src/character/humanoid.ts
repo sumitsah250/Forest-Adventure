@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { HEAD_C, beardTexture, faceTexture, hairCardTexture, hairNormal, hairStrandTexture, headSurface, irisTexture, sculpt, tuft, type HeadStyle } from './head.ts';
+import { characterLit } from './characterLight.ts';
 
 export const BONE_NAMES = [
   'root', 'hips', 'spine', 'chest', 'neck', 'head',
@@ -82,7 +83,15 @@ export interface Outfit {
   hood?: boolean;
   /** Default: 'swept' with a suit, otherwise 'short'. */
   hairStyle?: 'short' | 'swept' | 'textured' | 'long' | 'ponytail' | 'bun' | 'bald';
+  /**
+   * A skinned glTF body to wear instead of the built-in one (src/character/playerModel.ts).
+   * The rest of the outfit is the fallback while it loads or if it fails.
+   */
+  model?: CharacterModel;
 }
+
+/** Skinned glTF character models (see src/character/playerModel.ts). */
+export type CharacterModel = 'player' | 'sumit';
 
 export const RANGER: Outfit = {
   id: 'ranger', skin: '#b98a70', hair: '#3a2a1e',
@@ -1268,7 +1277,11 @@ function buildOutfit(o: Outfit): BuiltOutfit {
     badge: new THREE.MeshStandardMaterial({ color: '#b39553', roughness: 0.35, metalness: 0.85 }),
     shirt: cloth('#eceae4', 'twill', 0.8),
   };
-  for (const [k, m] of Object.entries(mats)) m.name = `${o.id}-${k}`;
+  for (const [k, m] of Object.entries(mats)) {
+    m.name = `${o.id}-${k}`;
+    // Readable after dark (characterLight.ts: no effect until a game sets the character light).
+    characterLit(m);
+  }
   const built = { geometry, materials: MATS.map((m) => mats[m]) };
   outfitCache.set(o.id, built);
   return built;

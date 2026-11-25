@@ -155,7 +155,7 @@ export interface MissionContext {
   spotted?: () => void;
   /** Mission 9: the evidence board in accuse mode; resolves once the right person is named. */
   accuse?: () => Promise<void>;
-  /** Sunil's motorbike (mission 10's chase; it stays where it stopped for C9). */
+  /** Sumit's motorbike (mission 10's chase; it stays where it stopped for C9). */
   bike?: Motorbike;
   /** A step starts (main opens the main gate for the bike chase). */
   onStep?: (st: Step) => void;
@@ -186,6 +186,8 @@ export class Missions {
   private device: { obj: THREE.Group; spot: Spot } | null = null;
   private rings: CheckRing[] = [];
   private ringAt = 0;
+  /** The ring race has been joined (the first moment in Kalki during the drive step). */
+  private ringsJoined = false;
   private patrols: Patrol[] = [];
   private chase: ChaseState | null = null;
   private stepGroup = new THREE.Group();
@@ -471,6 +473,7 @@ export class Missions {
     this.device = null;
     this.rings = [];
     this.ringAt = 0;
+    this.ringsJoined = false;
     this.patrols = [];
     this.chase = null;
     this.pursuer = null;
@@ -673,7 +676,7 @@ export class Missions {
       }
       case 'chase': {
         this.timer = this.eased(st.time);
-        // The target: a courier drone, or Sunil's motorbike (owned by main, so it outlives the step).
+        // The target: a courier drone, or Sumit's motorbike (owned by main, so it outlives the step).
         let drone: Drone | null = null;
         if (!st.bike || !this.c.bike) {
           drone = new Drone(2, false);
@@ -1276,7 +1279,23 @@ export class Missions {
           }
           break;
         case 'drive': {
-          const r = this.rings[this.ringAt];
+          // The race starts where Kalki joins it: rings already behind the kart then (Kalki called to
+          // the workshop sits beside ring 2, with ring 1 back down the road) are not owed, so nobody
+          // has to turn round for them.
+          if (inKart && !this.ringsJoined) {
+            this.ringsJoined = true;
+            this.skipRingsBehind(focus);
+          }
+          // Through the next ring; or, a near miss, straight through the one after it: the missed
+          // ring is given up (no coins, the combo breaks) instead of a drive back for it.
+          let r = this.rings[this.ringAt];
+          const after = this.rings[this.ringAt + 1];
+          if (r && after && inKart && d2(r.x, r.z) >= 4.4 && d2(after.x, after.z) < 4.4) {
+            this.ringAt += 1;
+            this.breakChain();
+            this.c.ui.toast('Missed a ring', 'bad');
+            r = after;
+          }
           if (r && inKart && d2(r.x, r.z) < 4.4) {
             this.ringAt += 1;
             const got = this.chain(3);
@@ -1524,7 +1543,7 @@ export class Missions {
   }
 
   /**
-   * Sunil's motorbike: never caught, never more than 60 m ahead (it waits), quicker when Kalki is
+   * Sumit's motorbike: never caught, never more than 60 m ahead (it waits), quicker when Kalki is
    * right behind. The step ends when it reaches the end of the route, by the main gate.
    */
   private updateBike(dt: number, ch: ChaseState, st: Extract<Step, { kind: 'chase' }>, bike: Motorbike, focus: THREE.Vector3, inKart: boolean): boolean {
@@ -1557,6 +1576,23 @@ export class Missions {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Joining a ring race part-way along: when a later ring is clearly the nearer way in (ring 1 at
+   * least 15 m further off than it), start from that one. Never past the halfway ring, so the race
+   * is still driven, and never the finish.
+   */
+  private skipRingsBehind(p: THREE.Vector3): void {
+    const n = this.rings.length;
+    if (n < 3) return;
+    const dist = (q: CheckRing) => Math.hypot(q.x - p.x, q.z - p.z);
+    let best = 0;
+    for (let i = 1; i < n; i += 1) if (dist(this.rings[i]) < dist(this.rings[best])) best = i;
+    best = Math.min(best, n - 2, Math.floor(n / 2));
+    if (best === 0 || dist(this.rings[0]) < dist(this.rings[best]) + 15) return;
+    this.ringAt = best;
+    this.refreshHud();
   }
 
   private routeAt(route: Pt[], lens: number[], s: number): { x: number; z: number } {
@@ -1696,6 +1732,13 @@ export class Missions {
 
   /** Turns a "where" into a standing spot in front of the place. */
   resolve(w: Where, label: string, item = false): Spot {
+    // Never in a walk-in doorway: people and props there would block the way in.
+    const s = this.resolveSpot(w, label, item);
+    const [x, z] = this.c.world.awayFromDoors(s.x, s.z);
+    return { ...s, x, z };
+  }
+
+  private resolveSpot(w: Where, label: string, item = false): Spot {
     const world = this.c.world;
     // Items sit beside the door, not in front of it; `beside` shifts further along the wall.
     const side = (item ? 1.8 : 0) + ('beside' in w ? w.beside ?? 0 : 0);

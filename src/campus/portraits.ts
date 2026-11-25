@@ -6,7 +6,8 @@
 // dialogue card falls back to initials.
 
 import * as THREE from 'three';
-import { createHumanoid, type Humanoid, type Outfit } from '../character/humanoid.ts';
+import type { Humanoid, Outfit } from '../character/humanoid.ts';
+import { createCharacter } from '../character/playerModel.ts';
 import { dressExtras } from './props.ts';
 
 const SIZE = 256;
@@ -65,7 +66,7 @@ export class Portraits {
       for (const { id, outfit, make, keep, extras } of list) {
         if (this.urls.has(id)) continue;
         try {
-          const rig = outfit ? createHumanoid(outfit) : make!();
+          const rig = outfit ? createCharacter(outfit) : make!();
           if (extras) dressExtras(rig, extras);
           scene.add(rig.root);
           r.setRenderTarget(target);

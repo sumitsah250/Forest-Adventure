@@ -48,8 +48,8 @@ export const MISSIONS: MissionDef[] = [
       },
       { kind: 'talk', npc: 'dhungana', lines: T.m2.dhungana2 },
       { kind: 'drive', obj: T.m2.driveObj, route: RING_EAST, time: 50 },
-      // Clue c1 (the red pen drive) is never mentioned: tapping Sunil's lanyard during the talk finds it.
-      { kind: 'talk', npc: 'sunil', at: { building: 'Power House', beside: 3.5 }, obj: T.m2.sunilObj, lines: T.m2.sunil, lookCloser: 'c1' },
+      // Clue c1 (the red pen drive) is never mentioned: tapping Sumit's lanyard during the talk finds it.
+      { kind: 'talk', npc: 'sumit', at: { building: 'Power House', beside: 3.5 }, obj: T.m2.sumitObj, lines: T.m2.sumit, lookCloser: 'c1' },
     ],
     reward: { coins: 150, xp: 150, unlock: 'grip', card: T.m2.card },
   },
@@ -60,7 +60,7 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'talk', npc: 'bhattarai', lines: T.m3.bhattarai1 },
       { kind: 'collect', obj: T.m3.fuseObj, verb: 'Take', items: [{ label: T.m3.fuseLabel, model: 'part', at: { building: 'Electrical Lab' } }] },
       // Clue c2 is never announced: his "6:55" line (line 2) goes to the radio log, to pin to the board.
-      { kind: 'radio', from: 'sunil', lines: T.m3.sunilRadio, pin: { clue: 'c2', line: 1 } },
+      { kind: 'radio', from: 'sumit', lines: T.m3.sumitRadio, pin: { clue: 'c2', line: 1 } },
       { kind: 'talk', npc: 'bhattarai', lines: T.m3.bhattarai2 },
       {
         // time: a drone is cutting through the Power House door while the player works.
@@ -156,7 +156,7 @@ export const MISSIONS: MissionDef[] = [
     // BP Park: Bhurtyal sir waits for the player there (decision 7).
     id: 'v2-signal', title: T.m7.title, clock: '9:20 PM', location: T.m7.location, sky: 'night', par: 330, brief: T.m7.brief,
     steps: [
-      { kind: 'radio', from: 'sunil', lines: T.m7.sunilStart },
+      { kind: 'radio', from: 'sumit', lines: T.m7.sumitStart },
       { kind: 'talk', npc: 'bhurtyal', at: { area: 'BP Park' }, lines: T.m7.bhurtyal },
       {
         kind: 'puzzle', at: { point: 'GNSS Receiver Test Station' }, label: T.m7.bearing1Label, obj: T.m7.bearing1Obj, model: 'gnss',
@@ -167,7 +167,7 @@ export const MISSIONS: MissionDef[] = [
         kind: 'puzzle', at: { point: 'Sahid Abinash Statue', dx: 3, dz: 3 }, label: T.m7.bearing2Label, obj: T.m7.bearing2Obj, model: 'gnss',
         puzzle: { type: 'tuner', title: T.m7.bearing2Title, clue: T.m7.bearing2Clue },
       },
-      { kind: 'radio', from: 'sunil', lines: T.m7.sunilCross },
+      { kind: 'radio', from: 'sumit', lines: T.m7.sumitCross },
       { kind: 'stealth', obj: T.m7.stealthObj, at: { point: 'Saraswati Temple', dx: -6, dz: 5 }, label: T.m7.relayLabel, model: 'relay', drones: 4 },
       {
         kind: 'puzzle', at: { point: 'Saraswati Temple', dx: -6, dz: 5 }, label: T.m7.lockLabel, obj: T.m7.lockObj, model: 'relay',
@@ -177,7 +177,7 @@ export const MISSIONS: MissionDef[] = [
       // C6: every drone drops a metre, hangs, and lights up blue; MITRA's memory types on screen.
       { kind: 'cutscene', id: 'C6' },
       { kind: 'radio', from: 'mitra', lines: T.m7.mitraEnd, clue: 'c9' },
-      { kind: 'radio', from: 'sunil', lines: T.m7.sunilEnd },
+      { kind: 'radio', from: 'sumit', lines: T.m7.sumitEnd },
     ],
     reward: { coins: 210, xp: 210, unlocks: ['shards', 'paint:marigold'], card: T.m7.card },
   },
@@ -212,7 +212,7 @@ export const MISSIONS: MissionDef[] = [
       { kind: 'talk', npc: 'tiwari', lines: T.m9.tiwariBoard },
       // The accusation on the evidence board. C7 (the red string) plays on the board itself.
       { kind: 'accuse' },
-      { kind: 'radio', from: 'sunil', lines: T.m9.sunilEnd },
+      { kind: 'radio', from: 'sumit', lines: T.m9.sumitEnd },
       { kind: 'radio', from: 'mitra', lines: T.m9.mitraEnd },
     ],
     reward: { coins: 240, xp: 240, card: T.m9.card },
@@ -246,7 +246,7 @@ export const MISSIONS: MissionDef[] = [
           { label: T.m10.moduleC, model: 'module', at: { building: 'Machining Workshop' } },
         ],
       },
-      // (c) the chase: Sunil on his motorbike, round the ring road to the main gate.
+      // (c) the chase: Sumit on his motorbike, round the ring road to the main gate.
       { kind: 'checkpoint' },
       { kind: 'radio', from: 'asha', lines: T.m10.ashaBike },
       { kind: 'chase', obj: T.m10.chaseObj, route: RING_TO_GATE.slice(0, -1), time: 120, speed: 12.5, bike: true },

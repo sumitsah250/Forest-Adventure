@@ -7,7 +7,7 @@
 
 import type { ClueId } from '../types.ts';
 
-export type InterludeGame = 'tuner' | 'tunerJammed' | 'chiya' | 'pong' | 'bubble' | 'hack' | 'generator' | 'bughunt' | 'garage';
+export type InterludeGame = 'tuner' | 'tunerJammed' | 'pong' | 'bubble' | 'hack' | 'generator' | 'bughunt' | 'garage';
 
 export interface InterludeDef {
   id: string;
@@ -48,15 +48,6 @@ export const INTERLUDES: InterludeDef[] = [
     reward: { coins: 0 },
   },
   {
-    id: 'chiya', after: 'v2-backup-power', title: 'Chiya Rush', clock: '7:45 PM', place: 'CAFETERIA', game: 'chiya',
-    clue: 'Serve each order in the order it was asked for.',
-    from: 'krishna',
-    intro: ['The lights are back and everyone wants chiya at once.', 'Help me serve the queue, and I will tell you what I hear.'],
-    win: ['You are quicker than my last helper. Here is something for your trouble.', 'People say Sunil dai\'s contract ends this month. MITRA replaces his paid system.'],
-    lose: ['Never mind, the queue is gone now. Come back if you want to try again.'],
-    reward: { coins: 60, clue: 'c13' },
-  },
-  {
     id: 'pong', after: 'v2-witness', title: 'Table Tennis with Raju', clock: '8:10 PM', place: 'TABLE TENNIS HALL', game: 'pong',
     clue: 'First to five. Raju plays fast but leaves the corners open.',
     from: 'raju',
@@ -77,7 +68,7 @@ export const INTERLUDES: InterludeDef[] = [
   {
     id: 'tunerJammed', after: 'v2-shelves', title: 'Signal Tuner: jammed', clock: '9:10 PM', place: 'WRC LIBRARY', game: 'tunerJammed',
     clue: 'The wave drifts. Keep the dial on it.',
-    from: 'sunil',
+    from: 'sumit',
     intro: ['Asha has gone quiet. MITRA is jamming every channel but one.', 'Find my wave and hold it. I will talk you to the relay.'],
     win: ['There you are. Stay on this channel and listen closely.'],
     lose: ['I can barely hear you. Head for the GNSS station anyway.'],

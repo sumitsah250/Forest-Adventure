@@ -4,7 +4,8 @@
 // around now and then.
 
 import * as THREE from 'three';
-import { createHumanoid, type Humanoid, type Outfit } from './humanoid.ts';
+import type { Humanoid, Outfit } from './humanoid.ts';
+import { createCharacter } from './playerModel.ts';
 import { Animator } from './animator.ts';
 import type { PhysicsWorld } from '../physics/physics.ts';
 import { range } from '../world/rng.ts';
@@ -38,7 +39,7 @@ export class Person {
   readonly name: string;
 
   constructor(scene: THREE.Scene, outfit: Outfit, ground: Ground, physics: PhysicsWorld, x: number, z: number, facing: number, name = '') {
-    this.rig = createHumanoid(outfit);
+    this.rig = createCharacter(outfit);
     scene.add(this.rig.root);
     // Feet follow the terrain only: a physics ray would hit the person's own collision
     // cylinder (hosts have one) and plant the feet on top of it.
@@ -84,11 +85,20 @@ export class Person {
     this.anim.reset(this.pos, facing);
   }
 
+  private wasFar = false;
+
   update(dt: number, camera: THREE.Vector3, player: THREE.Vector3 | null): void {
     const far = this.pos.distanceToSquared(camera) > 75 * 75;
     this.rig.root.visible = !far;
     if (this.route) this.walk(dt);
+    if (far) this.wasFar = true;
     if (far || dt <= 0) return;
+    if (this.wasFar) {
+      // Back in view after walking unseen: the feet were still planted where they were last drawn,
+      // metres behind, and the legs stretched back to them for the first steps. Stand afresh.
+      this.wasFar = false;
+      this.anim.reset(this.pos, this.facing);
+    }
     let lookAt: THREE.Vector3 | null = null;
     if (!this.route && player && player.distanceToSquared(this.pos) < 7 * 7) {
       // Turn to face the player when they come close.

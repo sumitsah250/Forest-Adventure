@@ -51,7 +51,12 @@ export class Cinema {
     this.card.className = 'cq-cine';
     this.hint = document.createElement('div');
     this.hint.className = 'cq-cine-skip';
-    this.hint.innerHTML = '<kbd>E</kbd> skip';
+    // Phones skipped with the Jump button, which is hidden while a shot plays: the hint itself is the button.
+    this.hint.innerHTML = window.matchMedia('(pointer: coarse)').matches ? 'Tap to skip' : '<kbd>E</kbd> skip';
+    this.hint.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.skip();
+    });
     root.append(this.bars, this.card, this.hint);
   }
 

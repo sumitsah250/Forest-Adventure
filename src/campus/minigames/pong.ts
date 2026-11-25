@@ -1,5 +1,8 @@
 // Table Tennis with Raju: pong, first to five. You are on the left. Drag on the table (touch or
 // mouse), or W / S or the arrow keys. Raju is quick but turns late and leaves the corners.
+// Tuned to be won (it is an interlude, not a test): your paddle is longer than his, the ball is
+// slow and speeds up gently, and Raju misreads your shots, most of all a steep one off the edge
+// of your paddle, so aiming for the corners wins points.
 
 import type { MiniContext, MiniGame, MiniResult } from './types.ts';
 
@@ -13,8 +16,10 @@ export interface PongText {
 export function tableTennis(text: PongText): MiniGame {
   const W = 520;
   const H = 300;
-  const PH = 64; // paddle height
+  const PH = 92; // your paddle's height
+  const RH = 64; // Raju's
   const PW = 10;
+  const MAX = 400; // top ball speed (px/s)
   const R = 7;
   const WIN = 5;
   let g: CanvasRenderingContext2D;
@@ -33,12 +38,15 @@ export function tableTennis(text: PongText): MiniGame {
   let done = false;
   let shownA = -1;
   let shownB = -1;
+  /** Where Raju thinks the ball will be, off by this much (set each time you hit it). */
+  let misread = 0;
   const serve = (toYou: boolean) => {
     bx = W / 2;
     by = H / 2;
-    vx = toYou ? -230 : 230;
-    vy = (Math.random() - 0.5) * 260;
-    wait = 0.8;
+    vx = toYou ? -175 : 175;
+    vy = (Math.random() - 0.5) * 160;
+    wait = 0.9;
+    misread = (Math.random() - 0.5) * 50;
   };
   const game: MiniGame = {
     start(ctx) {
@@ -74,16 +82,17 @@ export function tableTennis(text: PongText): MiniGame {
       if (done) return;
       // Your paddle.
       let v = 0;
-      if (c.held.has('KeyW') || c.held.has('ArrowUp')) v -= 340;
-      if (c.held.has('KeyS') || c.held.has('ArrowDown')) v += 340;
+      if (c.held.has('KeyW') || c.held.has('ArrowUp')) v -= 460;
+      if (c.held.has('KeyS') || c.held.has('ArrowDown')) v += 460;
       you += v * dt;
-      if (drag !== null) you += (drag - you) * Math.min(1, dt * 14);
+      if (drag !== null) you += (drag - you) * Math.min(1, dt * 22);
       you = Math.min(H - PH / 2, Math.max(PH / 2, you));
-      // Raju follows the ball, with a top speed and a late turn.
-      const aim = vx > 0 ? by : H / 2;
-      const rs = 215 + (a + b) * 6;
+      // Raju follows the ball (once it is past the net), slower than the ball can go, aiming where
+      // he misreads it to be.
+      const aim = vx > 0 && bx > W * 0.45 ? by + misread : H / 2;
+      const rs = 150 + (a + b) * 3;
       raju += Math.max(-rs * dt, Math.min(rs * dt, aim - raju));
-      raju = Math.min(H - PH / 2, Math.max(PH / 2, raju));
+      raju = Math.min(H - RH / 2, Math.max(RH / 2, raju));
       // Ball.
       if (wait > 0) wait -= dt;
       else {
@@ -92,14 +101,16 @@ export function tableTennis(text: PongText): MiniGame {
         if (by < R) { by = R; vy = Math.abs(vy); c.sound('click'); }
         if (by > H - R) { by = H - R; vy = -Math.abs(vy); c.sound('click'); }
         // Paddles: the further from the middle you hit it, the steeper it goes.
-        if (vx < 0 && bx - R < 24 + PW && bx > 18 && Math.abs(by - you) < PH / 2 + R) {
-          vx = Math.min(560, Math.abs(vx) * 1.07);
-          vy = ((by - you) / (PH / 2)) * 300;
+        // Your paddle forgives a few pixels; the steeper your shot, the worse Raju reads it.
+        if (vx < 0 && bx - R < 24 + PW && bx > 14 && Math.abs(by - you) < PH / 2 + R + 4) {
+          vx = Math.min(MAX, Math.abs(vx) * 1.03);
+          vy = Math.max(-1, Math.min(1, (by - you) / (PH / 2))) * 300;
+          misread = (Math.random() - 0.5) * (50 + Math.abs(vy) * 0.45);
           c.sound('switch');
         }
-        if (vx > 0 && bx + R > W - 24 - PW && bx < W - 18 && Math.abs(by - raju) < PH / 2 + R) {
-          vx = -Math.min(560, Math.abs(vx) * 1.05);
-          vy = ((by - raju) / (PH / 2)) * 280;
+        if (vx > 0 && bx + R > W - 24 - PW && bx < W - 18 && Math.abs(by - raju) < RH / 2 + R) {
+          vx = -Math.min(MAX, Math.abs(vx) * 1.02);
+          vy = ((by - raju) / (RH / 2)) * 190;
           c.sound('switch');
         }
         if (bx < -R) { b += 1; c.sound('knock'); serve(true); }
@@ -118,7 +129,7 @@ export function tableTennis(text: PongText): MiniGame {
       g.fillStyle = '#f2c84b';
       g.fillRect(24, you - PH / 2, PW, PH);
       g.fillStyle = '#c9ced6';
-      g.fillRect(W - 24 - PW, raju - PH / 2, PW, PH);
+      g.fillRect(W - 24 - PW, raju - RH / 2, PW, RH);
       g.fillStyle = '#ffffff';
       g.beginPath();
       g.arc(bx, by, R, 0, Math.PI * 2);

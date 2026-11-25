@@ -14,7 +14,7 @@ export const T = {
     pick: 'Choose your story',
     name: 'Blackout at WRC',
     tag: 'The new story · 10 missions',
-    blurb: 'The night before the tech fest, the campus AI locks every gate and names <b>you</b> as the intruder. Ten missions, one night, one go-kart called <b>Kalki</b>. Find who really did it before the exam paper leaks at 6 AM.',
+    blurb: 'The night before the tech fest, the campus AI locks every gate and names <b>you</b> as the intruder. Ten missions, one night, one dune buggy called <b>Kalki</b>. Find who really did it before the exam paper leaks at 6 AM.',
   },
 
   props: {
@@ -108,14 +108,6 @@ export const T = {
       fail: 'Only static. Try the dial again.',
       jammed: 'MITRA is jamming the band. Chase the signal as it drifts.',
     },
-    chiya: {
-      items: ['Milk tea', 'Black tea', 'Lemon tea', 'Samosa'],
-      order: 'Order {n}',
-      status: 'Served {n} of {need} · {s} s',
-      wrong: 'Wrong one! Start that order again.',
-      ok: 'Every order served hot. Krishna Dai is impressed.',
-      fail: 'The queue got away from you. Try again.',
-    },
     pong: {
       score: 'You {a} : {b} Raju',
       serve: 'First to five. Drag, or use W / S or the arrows.',
@@ -174,7 +166,8 @@ export const T = {
     krishnaPrompt: 'Talk to Krishna Dai',
     krishna: [
       'Still awake? Me too, and chiya is free tonight.',
-      'People say Sunil dai\'s contract ends this month. MITRA replaces his paid system.',
+      'People say Sumit dai built MITRA alone, then warned the committee it was dangerous.',
+      'They shelved his report and gave MITRA to the Exam Section. He never forgave them.',
     ],
   },
 
@@ -196,8 +189,8 @@ export const T = {
     c6: 'Raju bolted the moment I said "server room". That goes on the board.',
     c7: 'I copied the library register: Raju was there 6:40 to 7:15.',
     c8: 'That note in "Ethics of AI" is mine. I pinned it anyway.',
-    c11: 'Bahadur Dai\'s register says Sunil signed out at 6:30. His bike never left.',
-    c12: 'The console log: sbasnet, then my account, at 6:55. Pinned.',
+    c11: 'Bahadur Dai\'s register says Sumit signed out at 6:30. His bike never left.',
+    c12: 'The console log: sumit.dev, then my account, at 6:55. Pinned.',
   } as Record<string, string>,
 
   /** Screens outside the missions: name entry, the fest demo leaderboard, the location card. */
@@ -233,7 +226,7 @@ export const T = {
     stealthObj: 'Reach Asha behind the RIC',
     stealthLabel: 'Asha',
     ashaMeet: [
-      'I built MITRA, and it has never lied before. Someone fed it your name.',
+      'I run MITRA for the Exam Section, and it has never lied before. Someone fed it your name.',
       'I have wheels. Do not laugh.',
     ],
     kartObj: 'Jump into Kalki!',
@@ -266,12 +259,13 @@ export const T = {
       'Drones are closing the Power House road. Drive carefully, but drive now.',
     ],
     driveObj: 'Race the ring road before drones seal the Power House',
-    sunil: [
-      'Sunil Basnet, I look after the exam server. Call me Sunil dai.',
-      'I am locked in too, so let me help. I know every cable on this campus.',
+    sumit: [
+      'I am Sumit. I built MITRA, back when I studied here.',
+      'Call me Sumit dai. My own AI locked me in, can you believe it?',
+      'So let me help. I know every cable on this campus.',
       'Take radio channel 4. It has less static, usually.',
     ],
-    sunilObj: 'Talk to the man at the Power House',
+    sumitObj: 'Talk to the man at the Power House',
     card: 'FREE TUNE-UP: Dhungana sir fitted new tyres (+1 grip).',
   },
 
@@ -285,8 +279,8 @@ export const T = {
     ],
     fuseObj: 'Fetch the spare fuse from the Electrical Lab',
     fuseLabel: 'Spare fuse',
-    sunilRadio: [
-      'Sunil dai here. A drone is cutting through that door, so be quick.',
+    sumitRadio: [
+      'Sumit dai here. A drone is cutting through that door, so be quick.',
       'These locks came down at 6:55 sharp. Bad luck for all of us.',
     ],
     bhattarai2: ['Well done. Now set the breakers to exactly 19.'],
@@ -318,11 +312,11 @@ export const T = {
     thread: 'Grey hoodie thread',
     cap: 'Red pen-drive cap',
     krishna2: [
-      'A yellow strap? Students wear blue; only contractors get yellow.',
+      'A yellow strap? Students wear blue; only visitors get yellow.',
       'And half the campus owns that grey hoodie. Be careful who you blame.',
     ],
     ashaBoard: [
-      'Three people were here late: Raju, me, and Sunil dai.',
+      'Three people were here late: Raju, me, and Sumit dai.',
       'I pinned all three on a board. Yes, I put myself on it.',
     ],
     ashaEnd: ['The bank above the ground is sliding! Chhetri sir needs hands at the parapet.'],
@@ -382,7 +376,8 @@ export const T = {
     deskLabel: 'Librarian\'s desk',
     deskObj: 'Unlock the librarian\'s desk',
     deskTitle: 'Librarian\'s desk lock',
-    deskClue: 'Logic, Data, Ethics.',
+    // The call numbers flash by only as the books are picked up, so the spines are on the lock too (jumbled).
+    deskClue: 'The spines you brought back: Ethics of AI …2 · Digital Logic …4 · Data Structures …7. Enter the last digits in shelf order: Logic, Data, Ethics.',
     deskWhy: 'Logic (4), Data (7), Ethics (2): 472.',
     registerTitle: 'Library register (paper)',
     register: [
@@ -395,7 +390,7 @@ export const T = {
       'The handwriting is Asha\'s.',
     ],
     ashaEnd: [
-      'Yes. I wrote that rule, two years ago.',
+      'Yes. I wrote that rule, two years ago, when the Exam Section put me in charge of MITRA.',
       'I never thought someone would aim it at a student. I need a min—',
     ],
     card: 'The register clears Raju. The note points at Asha.',
@@ -405,9 +400,10 @@ export const T = {
     title: 'Signal Hunt',
     location: 'GNSS RECEIVER TEST STATION',
     brief: 'Two bearings, four drones, one relay.',
-    sunilStart: [
-      'Sunil dai here. Asha is not answering, so you get me, lucky you.',
-      'MITRA talks to its drones through a hidden relay. Two bearings and we have it.',
+    sumitStart: [
+      'Sumit dai here. Asha is not answering, so you get me, lucky you.',
+      'MITRA talks to its drones through a hidden relay. I designed it that way.',
+      'Two bearings and we have it.',
     ],
     bhurtyal: [
       'Take a bearing at the GNSS station first, then one at Sahid Abinash Statue.',
@@ -422,7 +418,7 @@ export const T = {
     bearing2Obj: 'Take the second bearing',
     bearing2Title: 'Bearing 2: Sahid Abinash Statue',
     bearing2Clue: 'Again. Peak, hold.',
-    sunilCross: [
+    sumitCross: [
       'The lines cross at the Saraswati Temple. Four drones, I count four.',
       'Stay out of the lights. I would come myself, but, you know, my knee.',
     ],
@@ -440,7 +436,7 @@ export const T = {
       'Relay offline. I… remember an order.',
       'Time 6:55 PM, account agurung. Terminal EXAM-CONSOLE-01.',
     ],
-    sunilEnd: [
+    sumitEnd: [
       'Did it say something? Never mind, it is confused.',
       'Bring that relay to me. I will keep it safe.',
     ],
@@ -478,7 +474,7 @@ export const T = {
     ],
     guardRegisterTitle: 'Guard register',
     guardRegister: [
-      '6:30 PM  OUT  Sunil Basnet, contractor. Signed.',
+      '6:30 PM  OUT  Sumit, visitor (alumnus). Signed.',
       'Night round, 11:05 PM: his motorbike is still in the motorcycle parking.',
     ],
     tiwari1: [
@@ -502,22 +498,23 @@ export const T = {
     ],
     consoleTitle: 'EXAM-CONSOLE-01: log',
     console: [
-      '6:55 PM  login sbasnet. Switch user: agurung.',
+      '6:55 PM  login sumit.dev. Switch user: agurung.',
       '6:55 PM  two patches pushed from a USB drive.',
     ],
     tiwariBoard: [
       'Every card you found is on the board. Now put a name to it.',
       'One card for each question. Be fair, and be sure.',
     ],
-    sunilEnd: [
+    sumitEnd: [
       'You were supposed to be simple.',
       'Carry the blame, open the gates. That was all.',
+      'I told them MITRA was dangerous in the wrong hands. Tonight I am the wrong hands.',
     ],
     mitraEnd: [
       'A firewall has gone up around the exam server. It is not mine.',
       'I am with you now. For the record, I was always polite.',
     ],
-    card: 'CASE CLOSED: Sunil Basnet did it. The paper still leaks at 6:00 AM.',
+    card: 'CASE CLOSED: Sumit, the hacker who built MITRA, did it. The paper still leaks at 6:00 AM.',
   },
 
   m10: {
@@ -547,19 +544,19 @@ export const T = {
     moduleB: 'Core module β',
     moduleC: 'Core module γ',
     ashaBike: [
-      'Sunil is on his motorbike with the red pen drive!',
+      'Sumit is on his motorbike with the red pen drive!',
       'He is going round the ring road for the main gate. Catch him!',
     ],
-    chaseObj: 'Chase Sunil to the main gate',
-    bikeLabel: 'Sunil',
+    chaseObj: 'Chase Sumit to the main gate',
+    bikeLabel: 'Sumit',
     chaseWait: 'He is waiting on the east ring road. Get close in Kalki.',
     chaseSub: 'Stay on his tail all the way to the main gate',
-    chaseGo: 'Sunil opens the main gate from his phone. After him!',
+    chaseGo: 'Sumit opens the main gate from his phone. After him!',
     c8Kicker: 'The longest night',
     c9Mitra: 'Main gate: closing.',
-    c9Mitra2: 'You signed out at 6:30, Sunil. Sign out properly this time.',
+    c9Mitra2: 'You built me to protect this campus, Sumit. I am protecting it.',
     bahadurGate: [
-      'Easy, Sunil babu. The register says you left at 6:30.',
+      'Easy, Sumit babu. The register says you left at 6:30.',
       'The pen drive, please. Now run, child, it is nearly six!',
     ],
     bahadurObj: 'Talk to Bahadur Dai at the main gate',

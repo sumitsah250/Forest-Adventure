@@ -1,12 +1,12 @@
 // Campus Quest entry point: renderer, physics, the campus world, the player and Kalki the
-// go-kart, people, the "Blackout at WRC" missions and side activities, the interface, the
+// dune buggy, people, the "Blackout at WRC" missions and side activities, the interface, the
 // sky through the night, and the frame loop.
 
 import '../style.css';
 import './campus.css';
 import * as THREE from 'three';
 import { Input } from '../core/input.ts';
-import { PRESETS, loadSettings, qualityOverride } from '../core/settings.ts';
+import { PRESETS, loadSettings, qualityOverride, saveSettings, type Quality } from '../core/settings.ts';
 import { installGrade } from '../render/grade.ts';
 import { GROUP, PhysicsWorld, groups, initRapier } from '../physics/physics.ts';
 import { Atmosphere, type AtmosphereState } from '../render/atmosphere.ts';
@@ -26,14 +26,14 @@ import { openShareCard } from './share.ts';
 import { decide, offerSkip, runMini, runPuzzle } from './minigames.ts';
 import type { MiniGame } from './minigames/types.ts';
 import { signalTuner } from './minigames/tuner.ts';
-import { chiyaRush } from './minigames/chiya.ts';
 import { tableTennis } from './minigames/pong.ts';
 import { bubbleLevel } from './minigames/bubble.ts';
 import { generatorPull } from './minigames/generator.ts';
 import { bugHunt } from './minigames/bughunt.ts';
 import { ShardRiddles } from './shardRiddles.ts';
 import { PLAYER_SUIT, setCharacterDetail } from '../character/humanoid.ts';
-import { loadPlayerModel } from '../character/playerModel.ts';
+import { characterLightForSky } from '../character/characterLight.ts';
+import { loadCharacterModel, loadPlayerModel } from '../character/playerModel.ts';
 import { CampusUI, type GarageState, type MissionCard } from './ui.ts';
 import { Missions, type MissionResult } from './missions.ts';
 import { Extras } from './extras.ts';
@@ -53,7 +53,7 @@ import { Fireflies, Lightning, Rain, Sparks } from './fx.ts';
 import { CampusSound } from './soundscape.ts';
 import { buildHumps } from './ramps.ts';
 import { WheelSpray } from '../vehicles/spray.ts';
-import { Kalki, MAX_UPGRADE, PAINTS, UPGRADE_COST } from './kart.ts';
+import { Kalki, MAX_UPGRADE, PAINTS, UPGRADE_COST, loadKalkiModel } from './kart.ts';
 import { claimDaily, has, levelOf, loadProfile, resetForDemo, resetStory, saveProfile, titleFor } from './profile.ts';
 import { badgeViews, checkBadges, goalViews, refreshGoals, starsTotal, trackGoal, type GoalEvent } from './meta.ts';
 import { createLoadingScreen } from '../ui/loadingScreen.ts';
@@ -73,28 +73,60 @@ const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 const C = (h: string) => new THREE.Color(h);
 /** The title screen: a clear Pokhara afternoon (less haze than the forest, so the Himalaya shows). */
 const AFTERNOON: AtmosphereState = { zenith: C('#3c78c2'), horizon: C('#c9d6de'), fog: C('#b4c3cc'), sunColor: C('#ffd29a'), sunIntensity: 3.8, envIntensity: 0.8, fogDensity: 0.0011, fogFalloff: 0.02, cover: 0.28, exposure: 1 };
-/** The story's skies: the sun going down at 7 PM, a moonlit monsoon night, sunrise over Machhapuchhre. */
+/** Direction toward a light in the sky: bearing in degrees clockwise from north (-z), elevation in degrees. */
+const sky = (bearing: number, elevation: number) => {
+  const b = THREE.MathUtils.degToRad(bearing);
+  const e = THREE.MathUtils.degToRad(elevation);
+  return new THREE.Vector3(Math.sin(b) * Math.cos(e), Math.sin(e), -Math.cos(b) * Math.cos(e));
+};
+/**
+ * The story's skies: the sun going down at 7 PM, a moonlit monsoon night, sunrise over Machhapuchhre.
+ * The light moves through the night (sunDir): the dusk sun low in the west-north-west, where it sets over Lamachaur in
+ * the monsoon months, so shadows run long to the east; the moon high in the south-east; before dawn the light low in
+ * the east; the morning sun up over the east-north-east. The sky is warm only toward the sun (horizon) and cools away
+ * from it (horizonAway); the shadows take the blue of the open sky (fill) instead of the sunset's orange.
+ */
 const SKIES: Record<Sky, AtmosphereState> = {
-  dusk: { zenith: C('#33507e'), horizon: C('#e2a274'), fog: C('#a08c84'), sunColor: C('#ffa862'), sunIntensity: 2.5, envIntensity: 0.6, fogDensity: 0.0013, fogFalloff: 0.02, cover: 0.42, exposure: 1.05 },
-  night: { zenith: C('#0d1733'), horizon: C('#34466c'), fog: C('#243049'), sunColor: C('#a9c2ff'), sunIntensity: 1.15, envIntensity: 0.42, fogDensity: 0.0016, fogFalloff: 0.02, cover: 0.5, exposure: 1.25 },
+  dusk: { zenith: C('#33507e'), horizon: C('#e6a676'), horizonAway: C('#9a9db6'), fog: C('#948e98'), sunColor: C('#ffb072'), sunIntensity: 2.5, envIntensity: 0.72, fogDensity: 0.0013, fogFalloff: 0.02, cover: 0.42, exposure: 1.1, sunDir: sky(285, 11), fill: 0.22 },
+  // Deep navy overhead, a dim grey-blue horizon and silver (not blue) moonlight: a saturated blue sky
+  // plus a strong blue moon washed the whole campus electric blue and turned leaves white.
+  night: { zenith: C('#05080f'), horizon: C('#212838'), horizonAway: C('#171c28'), fog: C('#121722'), sunColor: C('#c4cde0'), sunIntensity: 0.95, envIntensity: 0.38, fogDensity: 0.0016, fogFalloff: 0.02, cover: 0.5, exposure: 1.18, sunDir: sky(135, 40) },
   // Clear and still dark, with first light low in the east (V2 mission 10, 5:20 AM).
-  predawn: { zenith: C('#101c40'), horizon: C('#5a6490'), fog: C('#2c3654'), sunColor: C('#b4c4ff'), sunIntensity: 1.35, envIntensity: 0.5, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.14, exposure: 1.22 },
-  dawn: { zenith: C('#4a6fae'), horizon: C('#f6c08e'), fog: C('#c9b4a6'), sunColor: C('#ffc28a'), sunIntensity: 3.1, envIntensity: 0.72, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.3, exposure: 1.05 },
+  predawn: { zenith: C('#080d1c'), horizon: C('#4a4456'), horizonAway: C('#262a3a'), fog: C('#1e2130'), sunColor: C('#c8cfe2'), sunIntensity: 1.05, envIntensity: 0.4, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.14, exposure: 1.12, sunDir: sky(100, 22) },
+  dawn: { zenith: C('#4a6fae'), horizon: C('#f6c08e'), horizonAway: C('#b3b8ca'), fog: C('#bdb2ab'), sunColor: C('#ffc28a'), sunIntensity: 3.1, envIntensity: 0.76, fogDensity: 0.0012, fogFalloff: 0.02, cover: 0.3, exposure: 1.05, sunDir: sky(70, 13), fill: 0.3 },
 };
 
+/**
+ * Every 2D canvas the game paints (ground, map, signs, faces, decals, the minimap) is kept in
+ * ordinary memory. Chrome keeps big canvases on the GPU, and when graphics memory runs out the GPU
+ * resets and those come back empty: the roads and the minimap went blank mid-game and stayed blank,
+ * because each is painted once and three.js re-uploads textures from the (now empty) canvases.
+ */
+function keepCanvasesInMemory(): void {
+  const proto = HTMLCanvasElement.prototype as unknown as { getContext(type: string, options?: object): unknown };
+  const getContext = proto.getContext;
+  proto.getContext = function (this: HTMLCanvasElement, type: string, options?: object) {
+    return getContext.call(this, type, type === '2d' ? { willReadFrequently: true, ...options } : options);
+  };
+}
+
 async function boot(): Promise<void> {
+  keepCanvasesInMemory();
   const settings = loadSettings();
   const forced = qualityOverride();
   if (forced) settings.quality = forced;
   const preset = PRESETS[settings.quality];
   setCharacterDetail(settings.quality !== 'low');
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: preset.antialias, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: params.has('test') });
+  const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+  // Phones get MSAA and the colour grade even on Low: tile-based mobile GPUs resolve MSAA almost for free, and the
+  // grade is a few ALU ops in tone mapping. Without them foliage and roof edges were jagged and colours flat.
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: preset.antialias || touchDevice, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: params.has('test') });
   // Reading each shader's error log makes the browser wait for every compile in turn (seconds on phones).
   renderer.debug.checkShaderErrors = import.meta.env.DEV;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  if (preset.grading) installGrade(renderer);
+  if (preset.grading || touchDevice) installGrade(renderer);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
@@ -103,10 +135,9 @@ async function boot(): Promise<void> {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.08, 1600);
   camera.rotation.order = 'YXZ';
-  // Phones and tablets: their screens have 2-3x more pixels than their GPUs can fill at 60 fps, and on a small screen
-  // CSS-pixel resolution looks fine. The adaptive scale below lowers it further if frames still run slow.
-  const touchDevice = window.matchMedia('(pointer: coarse)').matches;
-  const maxRatio = touchDevice ? 1 : 1.5;
+  // Phones and tablets: their screens have 2-3x more pixels than their GPUs can fill at 60 fps, so cap at 1.5x CSS
+  // pixels (1x was a third of a 3x phone's resolution: visibly blocky). The adaptive scale below lowers it if frames run slow.
+  const maxRatio = 1.5;
   let resScale = 1;
   const resize = () => {
     const w = window.innerWidth;
@@ -122,7 +153,9 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', resize);
   const input = new Input(canvas);
 
-  const playerModel = loadPlayerModel();
+  // The player's body, Sumit's (the story's villain) and Kalki load alongside the world.
+  const playerModel = Promise.all([loadPlayerModel(), loadCharacterModel('sumit')]);
+  const kalkiModel = loadKalkiModel();
   progress(0.02, 'Starting physics');
   const R = await initRapier();
   progress(0.04, 'Reading the slope of Lamachaur');
@@ -130,11 +163,14 @@ async function boot(): Promise<void> {
   const ground = new CampusGround();
   const physics = new PhysicsWorld(R, ground as unknown as TerrainData);
 
-  const atmosphere = new Atmosphere(scene);
+  const atmosphere = new Atmosphere(scene, { movingSun: true });
   const copySky = (s: AtmosphereState) => {
     const a = atmosphere.state;
     a.zenith.copy(s.zenith);
     a.horizon.copy(s.horizon);
+    a.horizonAway?.copy(s.horizonAway ?? s.horizon);
+    if (s.sunDir) atmosphere.sunDir.copy(s.sunDir);
+    a.fill = s.fill;
     a.fog.copy(s.fog);
     a.sunColor.copy(s.sunColor);
     Object.assign(a, { sunIntensity: s.sunIntensity, envIntensity: s.envIntensity, fogDensity: s.fogDensity, fogFalloff: s.fogFalloff, cover: s.cover, exposure: s.exposure });
@@ -152,8 +188,15 @@ async function boot(): Promise<void> {
   });
   scene.add(world.group);
   scene.add(world.backdrop);
+  world.bindSky(atmosphere.state.horizon, atmosphere.state.zenith);
   atmosphere.buildEnvironment(renderer, scene);
   atmosphere.apply(scene);
+  // The GPU can reset when graphics memory runs out. three.js restores the context and re-uploads
+  // textures from their sources (kept in memory, above); the sky's light was a GPU render: redo it.
+  canvas.addEventListener('webglcontextrestored', () => {
+    atmosphere.rebuildAfterContextLoss(renderer, scene);
+    console.warn('[campus] graphics context restored');
+  });
 
   // The player starts outside the main gate on Lamachaur Marg, facing into campus (title camera aside).
   const [ccx, ccz] = centroid(DATA.boundary);
@@ -175,13 +218,17 @@ async function boot(): Promise<void> {
   player.accelStop = 9;
   player.turnWalk = 8.5;
   player.turnRun = 6.5;
-  // The player's own model (public/assets/models/player/sumit_character.glb); the built-in suit is the fallback.
+  // Smoothness: ease the drawn body over stair steps; exact camera follow, soft pull-in past trunks.
+  player.smoothSteps = true;
+  player.tpc.smoothFollow = true;
+  // The player's own model (public/assets/models/player/survivor.glb); the built-in suit is the fallback.
   await playerModel;
   player.attachCharacter(scene, PLAYER_SUIT);
   physics.step();
 
   progress(0.9, 'Fuelling Kalki');
   const profile = loadProfile();
+  await kalkiModel;
   const kart = new Kalki(physics, ground as unknown as TerrainData, KART_HOME.x, KART_HOME.z, KART_HOME.heading, preset.headlightShadows);
   scene.add(kart.root);
   kart.setUpgrades(profile.upgrades);
@@ -421,13 +468,47 @@ async function boot(): Promise<void> {
     }
     const gy = ground.heightAt(at.x, at.z);
     const p = focus();
-    let dx = p.x - at.x;
-    let dz = p.z - at.z;
-    const l = Math.hypot(dx, dz) || 1;
-    dx /= l;
-    dz /= l;
+    // Towards the player (along +x when standing on the objective).
+    const base = Math.hypot(p.x - at.x, p.z - at.z) > 1e-3 ? Math.atan2(p.z - at.z, p.x - at.x) : 0;
     const target = new THREE.Vector3(at.x, gy + 1.6, at.z);
-    const V = (u: number, h: number, side = 0) => new THREE.Vector3(at.x + dx * u + dz * side, gy + h, at.z + dz * u - dx * side);
+    // The low sweep passes 8 to 12 m from the objective, 2 to 3 m up: from the player's side when that is
+    // clear, otherwise from the first side around it that is. Objectives often stand beside a building, and a
+    // fixed side flew the camera through its walls. Clear: both camera spots outside buildings and above
+    // the ground, the move unobstructed, and the objective in sight all the way.
+    const sight = groups(0xffff, GROUP.STATIC);
+    const blocked = (a: THREE.Vector3, b: THREE.Vector3, stopShort = 0) => {
+      const dir = b.clone().sub(a);
+      const len = dir.length();
+      if (len - stopShort <= 0.1) return false;
+      return !!physics.world.castRay(new physics.R.Ray(a, dir.divideScalar(len)), len - stopShort, true, undefined, sight);
+    };
+    const clearSweep = (from: THREE.Vector3, to: THREE.Vector3) => {
+      for (const q of [from, to, from.clone().lerp(to, 0.5)]) {
+        if (q.y < ground.heightAt(q.x, q.z) + 1 || DATA.buildings.some((b) => pointInPoly(q.x, q.z, b.pts))) return false;
+        if (blocked(q, target, 1.5)) return false;
+      }
+      return !blocked(from, to);
+    };
+    let dx = Math.cos(base);
+    let dz = Math.sin(base);
+    let flip = 1;
+    const sweepAt = (cx: number, cz: number, f: number) => {
+      const W = (u: number, h: number, side: number) => new THREE.Vector3(at.x + cx * u + cz * side * f, gy + h, at.z + cz * u - cx * side * f);
+      return [W(12, 3.2, 9), W(8, 2.2, -7)] as const;
+    };
+    search: for (const turn of [0, 1, -1, 2, -2, 3, -3, 4]) {
+      for (const f of [1, -1]) {
+        const a = base + (turn * Math.PI) / 4;
+        const [from, to] = sweepAt(Math.cos(a), Math.sin(a), f);
+        if (clearSweep(from, to)) {
+          dx = Math.cos(a);
+          dz = Math.sin(a);
+          flip = f;
+          break search;
+        }
+      }
+    }
+    const V =(u: number, h: number, side = 0) => new THREE.Vector3(at.x + dx * u + dz * side * flip, gy + h, at.z + dz * u - dx * side * flip);
     const replay = (profile.stars[d.id] ?? 0) > 0;
     const shots: Shot[] = [];
     if (!replay) shots.push({ from: V(110, 60, -30), to: V(55, 30, -12), look: target.clone().setY(gy - 4), lookTo: target, dur: 3.6, fov: 55 });
@@ -475,6 +556,7 @@ async function boot(): Promise<void> {
     skyFrom = {
       ...atmosphere.state, zenith: atmosphere.state.zenith.clone(), horizon: atmosphere.state.horizon.clone(),
       fog: atmosphere.state.fog.clone(), sunColor: atmosphere.state.sunColor.clone(),
+      horizonAway: atmosphere.state.horizonAway?.clone(), sunDir: atmosphere.sunDir.clone(),
     };
     skyTo = to;
     skyT = instant ? 0.999 : 0;
@@ -510,7 +592,10 @@ async function boot(): Promise<void> {
    * player's level, not steep, and clear of anything solid (benches, fences, trees, walls,
    * people) for the whole kart. Paved ground is preferred if it is about as close.
    */
-  const kartShape = new physics.R.Cuboid(0.8, 0.42, 1.2);
+  // Kalki the dune buggy with a little room around it: 2.1 m over the tyres, 2.9 m long, roll cage 1.5 m up
+  // (this was still the old go-kart's box, so Kalki could arrive half inside a fence, tree or bench).
+  // From 0.4 m up, so gentle slopes and kerbs don't count as blocked.
+  const kartShape = new physics.R.Cuboid(1.1, 0.5, 1.5);
   const findKartSpot = (p: { x: number; y: number; z: number } = player.position, lineOfSight = true): { x: number; z: number; heading: number } | null => {
     const look = player.yaw; // view forward is (-sin yaw, -cos yaw)
     const heading = look + Math.PI; // kart forward (sin h, cos h) = view forward
@@ -528,7 +613,7 @@ async function boot(): Promise<void> {
         if (DATA.buildings.some((b) => pointInPoly(x, z, b.pts))) continue;
         let blocked = false;
         physics.world.intersectionsWithShape(
-          { x, y: gy + 0.75, z }, rot, kartShape,
+          { x, y: gy + 0.9, z }, rot, kartShape,
           () => {
             blocked = true;
             return false;
@@ -636,7 +721,7 @@ async function boot(): Promise<void> {
       sound: (n) => audio.play(n),
       mode: 'accuse',
       questions: ACCUSATION,
-      culprit: 'sunil',
+      culprit: 'sumit',
       clearing: WRONG_ACCUSATION,
       // A wrong accusation costs 15 minutes on the sunrise clock.
       onWrong: () => {
@@ -646,7 +731,7 @@ async function boot(): Promise<void> {
     }),
     bike,
     onStep: (st) => {
-      // Mission 10: Sunil opens the main gate from his phone as the chase starts (decision 9).
+      // Mission 10: Sumit opens the main gate from his phone as the chase starts (decision 9).
       if (st.kind === 'chase' && st.bike) {
         gateTo = 1;
         gateRate = 1 / 1.6;
@@ -1033,6 +1118,23 @@ async function boot(): Promise<void> {
     dailyText = `☕ Chiya streak: day ${daily.streak} — +${daily.coins}◈${daily.streak < 7 ? ` (day ${daily.streak + 1}: +${50 + Math.min(daily.streak, 6) * 25}◈)` : ''}`;
   }
 
+  /**
+   * The graphics level picked on the title screen or the pause menu. The world is built for one level (trees,
+   * shadows, textures), so the choice is saved and the game reloads; the story continues from the saved step.
+   */
+  const graphics = {
+    current: settings.quality,
+    onPick: (q: Quality) => {
+      const saved = loadSettings();
+      saved.quality = q;
+      saveSettings(saved);
+      if (started && missions.def) saveProfile(profile);
+      // A ?quality= in the address (tests, shared links) would override the saved choice.
+      const url = new URL(location.href);
+      url.searchParams.delete('quality');
+      location.replace(url.toString());
+    },
+  };
   const toTitle = () => {
     if (started && missions.def) saveProfile(profile);
     state = 'title';
@@ -1056,6 +1158,7 @@ async function boot(): Promise<void> {
       player: STORY_VERSION === 2
         ? { line: ui.dialogue.fill(V2_TEXT.screens.nameMenu), onEdit: () => void askName(false).then(toTitle) }
         : null,
+      graphics: DEMO_MODE ? undefined : graphics,
     });
     dailyText = null;
   };
@@ -1113,7 +1216,8 @@ async function boot(): Promise<void> {
       };
     }),
     paints: Object.entries(PAINTS).map(([id, p]) => ({
-      id, name: p.name, body: p.body, trim: p.trim, price: p.price, owned: profile.paints.includes(id), current: profile.paint === id,
+      // The stock paint (null colours) shows the buggy's own black and yellow.
+      id, name: p.name, body: p.body ?? '#151515', trim: p.trim ?? '#f2c84b', price: p.price, owned: profile.paints.includes(id), current: profile.paint === id,
       locked: p.price === 0 && !profile.paints.includes(id) ? 'Story reward' : null,
     })),
   });
@@ -1208,7 +1312,6 @@ async function boot(): Promise<void> {
     switch (d.game) {
       case 'tuner': return signalTuner(false, m.tuner);
       case 'tunerJammed': return signalTuner(true, m.tuner);
-      case 'chiya': return chiyaRush(m.chiya);
       case 'pong': return tableTennis(m.pong);
       case 'bubble': return bubbleLevel(3, m.bubble);
       case 'generator': return generatorPull(m.generator);
@@ -1322,6 +1425,7 @@ async function boot(): Promise<void> {
       minisLabel: V2_TEXT.interlude.menu,
       onRestart: missions.def ? () => void missions.restart().then(play) : null,
       onTitle: toTitle,
+      graphics,
     });
   };
   const openMap = () => {
@@ -1461,7 +1565,7 @@ async function boot(): Promise<void> {
         stats: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, mission: missions.def ? `${missions.index + 1}/${MISSION_COUNT} step ${missions.step + 1}` : 'free roam' }),
       })
     : null;
-  (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, clues: clueBook, board: () => openBoardView(), cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, enterKart, exitKart, get mode() { return mode; } };
+  (window as unknown as { __campus: unknown }).__campus = { storyVersion: STORY_VERSION, missionCount: MISSIONS.length, clues: clueBook, board: () => openBoardView(), cutscenes, tarp, cinema, missions, extras, fireflies, sound, audio, profile, player, kart, input, ui, world, ground, scene, camera, renderer, atmosphere, enterKart, exitKart, get mode() { return mode; } };
 
   let last = performance.now();
   let acc = 0;
@@ -1469,24 +1573,56 @@ async function boot(): Promise<void> {
   let titleT = 0;
   // Adaptive resolution: every 1.5 s, drop the render scale if frames averaged slower than ~38 fps; raise it again
   // after three windows near 60 fps. Long gaps (tab hidden, a dialog) are not counted.
+  // A drop is kept only if it paid off. Where pixels are not what limits the frame (Iris Xe at 720p is held up by
+  // geometry, shadows and draw calls), a smaller image ran no faster, so the scale slid to its floor: the picture
+  // went soft for nothing, and every step reallocated the canvas (a hitch). Now a drop that doesn't buy 10 % is
+  // undone and not tried again for 30 s; the window after a resize is skipped, as the reallocation skews it.
   let winT = 0;
   let winN = 0;
   let good = 0;
-  const adapt = (ms: number) => {
-    if (ms > 250) return;
+  let trial: { from: number; before: number } | null = null;
+  let holdUntil = 0;
+  let settle = 0;
+  // ?pinres=0.75 (tests): hold the render scale fixed, so frame-time comparisons aren't masked by the adaptive scale.
+  const pinRes = Number(params.get('pinres'));
+  if (pinRes > 0) {
+    resScale = THREE.MathUtils.clamp(pinRes, 0.3, 1);
+    resize();
+  }
+  const adapt = (ms: number, now: number) => {
+    if (pinRes > 0 || ms > 250) return;
     winT += ms;
     winN += 1;
     if (winT < 1500) return;
     const avg = winT / winN;
     winT = 0;
     winN = 0;
-    if (avg > 26 && resScale > 0.55) {
+    if (settle > 0) {
+      settle -= 1;
+      return;
+    }
+    if (trial) {
+      const t = trial;
+      trial = null;
+      if (avg > t.before * 0.9) {
+        resScale = t.from;
+        good = 0;
+        settle = 1;
+        holdUntil = now + 30000;
+        resize();
+        return;
+      }
+    }
+    if (avg > 26 && resScale > 0.55 && now >= holdUntil) {
+      trial = { from: resScale, before: avg };
       resScale = Math.max(0.55, resScale * 0.85);
       good = 0;
+      settle = 1;
       resize();
     } else if (avg < 18.5 && resScale < 1 && ++good >= 3) {
       resScale = Math.min(1, resScale * 1.1);
       good = 0;
+      settle = 1;
       resize();
     } else if (avg >= 18.5) good = 0;
   };
@@ -1494,13 +1630,15 @@ async function boot(): Promise<void> {
 
   const loop = (now: number) => {
     requestAnimationFrame(loop);
-    adapt(now - last);
+    adapt(now - last, now);
     const rdt = THREE.MathUtils.clamp((now - last) / 1000, 0, 0.1);
     last = now;
     // Slow motion for big moments (eases back in over its last part); a hit-stop freezes time briefly.
     slow = Math.max(0, slow - rdt);
     freeze = Math.max(0, freeze - rdt);
     const dt = freeze > 0 ? 0 : rdt * (slow > 0 ? THREE.MathUtils.lerp(1, 0.3, Math.min(1, slow / 0.25)) : 1) * cutscenes.timeScale;
+    // The E / Space / tap that closed a message must not also jump, talk again or get in Kalki.
+    if (wasModal && !ui.modal) input.endFrame();
     if (cinema.playingShots && state === 'play' && (input.pressed('interact') || input.pressed('jump'))) cinema.skip();
     // A cutscene locks input: nothing below reads the controls while one plays.
     const playing = state === 'play' && !ui.modal && !cinema.playingShots && !cutscenes.playing;
@@ -1512,10 +1650,15 @@ async function boot(): Promise<void> {
 
     // Sky blend (missions change the time of day), then the image-based light once settled.
     if (skyT < 1) {
+      const thirdBefore = Math.floor(skyT * 3);
       skyT = Math.min(1, skyT + rdt / skyDur);
       atmosphere.blend(skyFrom, skyTo, THREE.MathUtils.smoothstep(skyT, 0, 1), scene);
+      // The sky's light is re-baked a third and two thirds of the way through too, not only at the end:
+      // baked once, the whole change of light landed in one frame and the player went dark all at once
+      // as evening came. (Not mid-cutscene: a re-bake can hitch a shot.)
+      if (skyT < 1 && Math.floor(skyT * 3) > thirdBefore && !cutscenes.playing) atmosphere.buildEnvironment(renderer, scene);
       const dark = (s: AtmosphereState) => s === SKIES.night || s === SKIES.predawn;
-      atmosphere.skyUniforms.uSunVisible.value = dark(skyTo) ? (dark(skyFrom) ? 0 : 1 - skyT) : dark(skyFrom) ? skyT : 1;
+      atmosphere.skyUniforms.uSunVisible.value = (dark(skyTo) ? (dark(skyFrom) ? 0 : 1 - skyT) : dark(skyFrom) ? skyT : 1) * atmosphere.sunHandover;
       renderer.toneMappingExposure = atmosphere.state.exposure;
       if (skyT >= 1) {
         atmosphere.buildEnvironment(renderer, scene);
@@ -1567,6 +1710,8 @@ async function boot(): Promise<void> {
     } else {
       input.consumeLook();
       if (!kart.occupied) kart.vehicle.phys.input = { throttle: 0, steer: 0, handbrake: true };
+      // Physics is paused under a message or cutscene: stand still, don't run in place.
+      if (mode === 'foot' && state === 'play') player.halt();
     }
     const alpha = acc / FIXED_DT;
     const adt = state === 'play' ? dt : 0;
@@ -1693,6 +1838,13 @@ async function boot(): Promise<void> {
     world.setWet(wet);
     // Night lighting: how dark it is, and campus power easing up to the story's level.
     const dark = THREE.MathUtils.clamp((3.05 - atmosphere.state.sunIntensity) / 1.7, 0, 1);
+    // The survivor's outfit is near black: from dusk on he became a black cut-out against the lit campus.
+    // (Raising envMapIntensity did nothing: with scene.environment three.js uses environmentIntensity.)
+    // Character fill, sheen and dark-cloth lift, tinted by the sun or moon (character/characterLight.ts).
+    characterLightForSky(dark, atmosphere.state.sunColor);
+    // After dark the Annapurna range is a pale shape in the haze, not lit white snow: the near-white snow under
+    // the moon came out as bright spikes. Thicker the cloudier the night (faint but there before a clear dawn).
+    world.setBackdropHaze(dark * THREE.MathUtils.lerp(0.25, 0.75, atmosphere.state.cover));
     const powerStep = rdt * powerRate;
     powerShown += THREE.MathUtils.clamp(powerTo - powerShown, -powerStep, powerStep);
     world.setLights(state === 'title' ? 0 : powerShown, Math.max(dark, glowMin));
@@ -1717,6 +1869,9 @@ async function boot(): Promise<void> {
     // Missions take E first; otherwise E gets in / out of Kalki.
     const f = focus();
     const interact = playing && input.pressed('interact');
+    // A prompt set outside the missions (Kalki, Krishna Dai's gossip): it also feeds the phone's tap button below,
+    // which otherwise only showed mission prompts, so phones had no way to act on these.
+    let rovePrompt: string | null = null;
     missions.update(adt, playing, f, interact && mode === 'foot', mode === 'foot' ? kart.position : null, playing && mode === 'foot' && input.held('interact'));
     // Story 2: the long wait after mission 9, the shard riddles, and the stored boost charge.
     if (longWait && playing && missions.index < 0) {
@@ -1725,10 +1880,11 @@ async function boot(): Promise<void> {
         missions.roamGoal = null;
         void startMission(SUNRISE);
       } else if (!profile.clues.c13 && mode === 'foot' && !missions.promptText && !ui.modal && !gossiping) {
-        // Decision 18: Krishna Dai repeats the gossip if the player never won Chiya Rush.
+        // Decision 18: Krishna Dai tells the gossip if the player has not heard it yet.
         const k = missions.npcSpot('krishna');
         if (k && Math.hypot(f.x - k.pos.x, f.z - k.pos.z) < 3) {
-          ui.setPrompt(V2_TEXT.longWait.krishnaPrompt);
+          rovePrompt = V2_TEXT.longWait.krishnaPrompt;
+          ui.setPrompt(rovePrompt);
           if (interact) {
             gossiping = true;
             const v = voiceOf('krishna');
@@ -1756,8 +1912,10 @@ async function boot(): Promise<void> {
       if (near) {
         if (kart.locked) ui.setPrompt('Kalki is locked — Dhungana sir has the key');
         else {
-          ui.setPrompt('Get in Kalki');
-          if (interact) enterKart();
+          rovePrompt = 'Get in Kalki';
+          ui.setPrompt(rovePrompt);
+          // The same E must not also start Krishna Dai's gossip (checked above) and get in.
+          if (interact && !gossiping) enterKart();
         }
       }
     }
@@ -1780,7 +1938,7 @@ async function boot(): Promise<void> {
       ui.setSpeed(mode === 'kart' ? { kmh: kart.speedKmh, boost: kart.boost, boostOn: kart.boostUnlocked, boosting: kart.boosting || kart.turbo > 0, hint: kartHint(), drift: kart.driftDir ? kart.driftT : 0, driftLevel: kart.driftLevel } : null);
       touch?.update({
         mode: mode === 'kart' ? 'vehicle' : 'foot',
-        prompt: missions.promptText ? { text: missions.promptText, progress: 0 } : null,
+        prompt: missions.promptText ? { text: missions.promptText, progress: 0 } : rovePrompt ? { text: rovePrompt, progress: 0 } : null,
         radio: null, armed: false, drawn: false, needsRecovery: mode === 'kart' && kart.vehicle.needsRecovery, flashlight: false, lights: kart.vehicle.lightsOn,
         boost: kart.boostUnlocked,
       });

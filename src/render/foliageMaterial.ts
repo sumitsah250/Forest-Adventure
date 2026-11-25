@@ -77,7 +77,12 @@ export function foliageMaterial(o: FoliageOptions): THREE.MeshStandardMaterial {
         `#include <lights_fragment_end>
         {
           // Thin needles and leaves glow faintly when the sun is behind them.
-          vec3 Ldir = normalize((viewMatrix * vec4(${SUN}, 0.0)).xyz);
+          // The scene's sun where it moves through the night (Campus Quest), else the fixed one.
+          #if defined( HC_SUN_LIGHT ) && NUM_DIR_LIGHTS > 0
+            vec3 Ldir = directionalLights[ 0 ].direction;
+          #else
+            vec3 Ldir = normalize((viewMatrix * vec4(${SUN}, 0.0)).xyz);
+          #endif
           float back = pow(max(dot(-normalize(vViewPosition), Ldir), 0.0), 4.0);
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uSunTrans * back * ${trans.toFixed(2)};
           // Skylight scattered through the canopy: the shaded underside of a crown is

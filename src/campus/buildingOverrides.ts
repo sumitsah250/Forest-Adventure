@@ -4,12 +4,15 @@
 //
 //   levels:    floors above ground
 //   height:    total height in metres (optional; default 3.2-3.5 m per floor)
-//   enterable: build a full interior you can walk into (see interior.ts)
+//   enterable: false leaves it solid (every campus building is walk-in otherwise; see interior.ts)
+//   use:       what it is for when the name doesn't say (interiors/program.ts: 'academic',
+//              'hostel', 'quarters', 'workshop', 'library', 'admin', 'store', 'block' ...)
 
 export interface BuildingOverride {
   levels?: number;
   height?: number;
   enterable?: boolean;
+  use?: string;
 }
 
 export const BUILDING_OVERRIDES: Record<string, BuildingOverride> = {

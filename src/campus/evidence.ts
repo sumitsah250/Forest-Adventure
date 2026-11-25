@@ -1,4 +1,4 @@
-// The evidence board (story 2). Three suspects (Raju, Asha, Sunil) with their portraits and every
+// The evidence board (story 2). Three suspects (Raju, Asha, Sumit) with their portraits and every
 // clue card found so far, gold or silver, plus a column for clues that point at no one yet.
 //
 //   openBoard(…, mode 'view')    read-only, from the end of mission 4 and the pause menu
@@ -6,13 +6,13 @@
 //                                three questions (drag it, or tap the card then the question; Tab
 //                                and Enter work too). Wrong suspect: the clearing cards light up
 //                                and it costs 15 minutes. Right suspect, weak card: try again.
-//                                Right: red string joins the cards, Sunil's portrait goes cold (C7).
+//                                Right: red string joins the cards, Sumit's portrait goes cold (C7).
 
 import type { ClueDef, ClueId } from './story.ts';
 import type { DialogueHost } from './dialogue.ts';
 
-type Suspect = 'raju' | 'asha' | 'sunil';
-const SUSPECTS: Suspect[] = ['raju', 'asha', 'sunil'];
+type Suspect = 'raju' | 'asha' | 'sumit';
+const SUSPECTS: Suspect[] = ['raju', 'asha', 'sumit'];
 
 export interface BoardText {
   boardTitle: string;
@@ -236,7 +236,7 @@ export function openBoard(host: DialogueHost, o: BoardOptions): Promise<void> {
       }
       hintEl.textContent = '';
       solveBtn.style.display = 'none';
-      // Right: red string from Sunil to the three cards, then his portrait goes cold (C7).
+      // Right: red string from Sumit to the three cards, then his portrait goes cold (C7).
       msg.textContent = t.accuseRight;
       o.sound('chord');
       box.classList.add('solved');

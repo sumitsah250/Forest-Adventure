@@ -192,7 +192,7 @@ MISSIONS.forEach((m, mi) => {
   });
 });
 // ------------------------------------------------------------------ interludes (Phase 7)
-const GAMES = new Set(['tuner', 'tunerJammed', 'chiya', 'pong', 'bubble', 'hack', 'generator', 'bughunt', 'garage']);
+const GAMES = new Set(['tuner', 'tunerJammed', 'pong', 'bubble', 'hack', 'generator', 'bughunt', 'garage']);
 const interludeIds = new Set();
 for (const d of INTERLUDES) {
   const ctx = `interlude ${d.id}`;

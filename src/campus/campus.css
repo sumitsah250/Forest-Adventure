@@ -152,6 +152,8 @@ kbd {
 .cq-story-pick { display: grid; gap: 6px; width: min(460px, 100%); }
 .cq-story-pick__label { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); }
 .cq-story-pick__row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cq-gfx-pick { margin-top: 10px; }
+.cq-gfx-pick .cq-story-pick__row { grid-template-columns: 1fr 1fr 1fr; }
 .cq-story-pick__opt {
   display: grid; gap: 3px; min-height: 56px; padding: 9px 12px; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 10px;
   background: rgba(255, 255, 255, 0.08); color: #fff; font: 600 15px var(--font); cursor: pointer; text-align: center;
@@ -360,8 +362,11 @@ kbd {
 .cq-cine__t { margin-top: 6px; font-size: clamp(38px, 7vw, 76px); font-weight: 900; line-height: 0.95; letter-spacing: 0.01em; text-transform: uppercase; }
 .cq-cine__s { margin-top: 12px; font-size: 17px; line-height: 1.45; color: rgba(255, 255, 255, 0.85); border-left: 3px solid var(--cq-gold); padding-left: 12px; }
 .cq-cine-skip { position: absolute; right: 22px; bottom: calc(11vh - 36px); z-index: 6; font-size: 13px; color: rgba(255, 255, 255, 0.6); opacity: 0; transition: opacity 0.4s; pointer-events: none; }
-.cq-cine-skip.on { opacity: 1; transition-delay: 1.2s; }
+.cq-cine-skip.on { opacity: 1; transition-delay: 1.2s; pointer-events: auto; cursor: pointer; }
+body.is-touch .cq-cine-skip { padding: 10px 16px; border-radius: 999px; background: rgba(0, 0, 0, 0.4); color: #fff; font-size: 14px; touch-action: manipulation; }
 body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
+/* Phones: the stick and buttons step out of a cinematic shot or cutscene too (the look pad stays: press and hold skips a cutscene). */
+body.cq-cinematic .touch > :not(.touch-look) { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 .cq-hud { transition: opacity 0.4s; }
 .cq-flash { position: absolute; inset: 0; pointer-events: none; z-index: 4; background: #dfe8ff; opacity: 0; mix-blend-mode: screen; }
 .cq-hit { position: absolute; inset: 0; pointer-events: none; z-index: 4; opacity: 0; box-shadow: inset 0 0 160px 40px rgba(220, 20, 40, 0.75); transition: opacity 0.5s; }
@@ -547,6 +552,11 @@ body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
   transition: transform 0.45s cubic-bezier(0.2, 1.3, 0.4, 1), opacity 0.3s;
 }
 .cq-badgepop.show { opacity: 1; transform: translate(-50%, 0); }
+/* Over a full-screen card: in from the top-right corner, clear of the card's title (where there is room beside it). */
+@media (min-width: 900px) {
+  .cq-badgepop.side { left: auto; right: max(14px, env(safe-area-inset-right)); transform: translate(0, -140%); }
+  .cq-badgepop.side.show { transform: translate(0, 0); }
+}
 .cq-badgepop > b { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: 22px; background: rgba(242, 210, 122, 0.2); }
 .cq-badgepop small { display: block; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cq-gold); }
 
@@ -716,12 +726,17 @@ body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
 .cq-board-demo__hint { margin: 0; font-size: 11px; color: rgba(255, 255, 255, 0.4); }
 
 /* ---------------------------------------------------------------- location card (screens.ts) */
+/* Below the objective panel (top left, up to 430 px wide), which a long place name at 96 px ran into;
+   below the mission banner too when both show (a mission resumed from a checkpoint). */
 .cq-loc {
-  position: absolute; left: 50%; top: max(96px, 14vh); z-index: 6; pointer-events: none; transform: translateX(-50%);
+  position: absolute; left: 50%; top: max(176px, 25vh); z-index: 6; pointer-events: none; transform: translateX(-50%);
   padding: 8px 16px; border-radius: 8px; background: rgba(4, 8, 16, 0.55); white-space: nowrap;
   font: 800 clamp(18px, 3.2vw, 32px) var(--mono); letter-spacing: 0.08em; color: #fff;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8); opacity: 0;
 }
+.cq-banner.show ~ .cq-loc { top: calc(22% + 128px); }
+/* Landscape phones: just under the panel, a little smaller, clear of the crosshair. */
+@media (max-height: 520px) { .cq-loc { top: 152px; font-size: clamp(15px, 2.6vw, 24px); } }
 .cq-loc.on { opacity: 1; }
 .cq-loc.on.out { opacity: 0; transition: opacity 0.4s ease; }
 .cq-loc__caret { display: inline-block; width: 0.55em; height: 0.9em; margin-left: 4px; vertical-align: -0.1em; background: #4fe3ff; animation: cq-caret 0.6s steps(1) infinite; }
@@ -847,9 +862,12 @@ body.cq-cinematic .cq-hud { opacity: 0; transition: opacity 0.4s; }
 }
 .cq-credits h3 { font-size: clamp(22px, 3.6vw, 34px); color: #ffd98a; letter-spacing: 0.06em; }
 @keyframes cq-credits { from { transform: translateY(100vh); } to { transform: translateY(-40vh); } }
+/* Opaque: at 0.97 alpha Chrome composited the tilted cards scrolling under it clearly through it (the
+   accusation questions sat over legible card text). It sticks flush to the screen edge (bottom: minus the
+   overlay's 16 px padding), so no strip of cards shows below it either. */
 .cq-board__foot {
-  position: sticky; bottom: 0; z-index: 2; display: grid; gap: 8px; margin: 0 -18px -18px; padding: 12px 18px 16px;
-  border-radius: 0 0 16px 16px; background: rgba(74, 52, 32, 0.97); box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.35);
+  position: sticky; bottom: -16px; z-index: 2; display: grid; gap: 8px; margin: 0 -18px -18px; padding: 12px 18px 16px;
+  border-radius: 0 0 16px 16px; background: #4a3420; box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.35);
 }
 .cq-board__foot > .cq-btn { justify-self: end; }
 .cq-board.accuse .cq-board__card span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -898,7 +916,8 @@ body.is-touch .cq-mini { top: 140px; bottom: auto; right: max(14px, calc(env(saf
 /* Keyboard hints mean nothing on a phone: the buttons say what they do. */
 body.is-touch .cq-speed__hint, body.is-touch .cq-btn kbd { display: none; }
 body.is-touch .cq-mini__hint { display: none; }
-body.is-touch .cq-hud .cq-callkart { right: auto; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
+/* z-index lifts it over the touch layer's full-screen look pad (added after the HUD), which otherwise took every tap. */
+body.is-touch .cq-hud .cq-callkart { right: auto; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 3; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 body.is-touch .cq-hud .cq-callkart:active { transform: translate(-50%, 3px); }
 body.is-touch .cq-hud .cq-callkart kbd { display: none; }
 body.is-touch .cq-compass { top: 10px; width: min(300px, 36vw); }

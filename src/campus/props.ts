@@ -8,7 +8,7 @@ import type { Humanoid } from '../character/humanoid.ts';
 
 /**
  * Props worn over an outfit, hung on the skeleton so they move with the body:
- *   lanyard  a yellow contractor's lanyard with a small red pen drive (Sunil; clue c1)
+ *   lanyard  a yellow visitor's lanyard with a small red pen drive (Sumit; clue c1)
  *   hood     the hood of a grey fest hoodie, down on the shoulders (Raju)
  */
 export function dressExtras(rig: Humanoid, extras: ('lanyard' | 'hood')[]): void {
@@ -86,7 +86,7 @@ export function festBanner(gate: GateSpot, title: string, sub: string): THREE.Gr
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.12 });
-  const w = gate.span * 2 - 1.3;
+  const w = gate.span * 2 - 1.6;
   const geo = new THREE.PlaneGeometry(w, w * (160 / 1024));
   const group = new THREE.Group();
   for (const side of [1, -1]) {
@@ -115,18 +115,19 @@ export class Tarp {
   private rz = 0;
 
   constructor() {
-    const geo = new THREE.BoxGeometry(1.95, 1.3, 3.0, 8, 4, 10);
+    // Sized for Kalki the dune buggy (2.1 m wide, 2.9 m long, roll cage 1.5 m up).
+    const geo = new THREE.BoxGeometry(2.3, 1.6, 3.2, 8, 4, 10);
     // Lumps and sag, so it reads as cloth over a machine and not a crate.
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i += 1) {
       const x = pos.getX(i);
       const y = pos.getY(i);
       const z = pos.getZ(i);
-      const top = Math.max(0, y) / 0.65;
+      const top = Math.max(0, y) / 0.8;
       const bump = Math.sin(x * 4.1 + z * 2.3) * 0.05 + Math.sin(z * 5.2 - x * 1.7) * 0.04;
-      // Lower in front and behind the seat, pinched in a little toward the ground.
-      const sag = top * (0.12 * Math.cos(z * 1.4) - 0.1);
-      const flare = 1 + (1 - (y + 0.65) / 1.3) * 0.08;
+      // Lower in front of the roll cage, pinched in a little toward the ground.
+      const sag = top * (0.2 * Math.cos(z * 1.2) - 0.18);
+      const flare = 1 + (1 - (y + 0.8) / 1.6) * 0.08;
       pos.setXYZ(i, x * flare + bump * 0.5, y + sag + bump * top, z * flare);
     }
     geo.computeVertexNormals();
@@ -145,8 +146,8 @@ export class Tarp {
   cover(p: THREE.Vector3, heading: number): void {
     this.t = -1;
     this.bx = p.x;
-    // The box is 1.3 m tall; its bottom edge sits at the ground under the kart.
-    this.by = p.y + 0.3;
+    // The box is 1.6 m tall; its bottom edge sits at the ground (Kalki's origin rides 0.34 m up).
+    this.by = p.y + 0.42;
     this.bz = p.z;
     // The kart's right, for the slide.
     this.rx = -Math.cos(heading);
@@ -425,7 +426,7 @@ export class DoorCut {
 }
 
 /**
- * Sunil's motorbike (mission 10): a low-poly bike with a helmeted rider in Sunil's colours
+ * Sumit's motorbike (mission 10): a low-poly bike with a helmeted rider in Sumit's colours
  * (decision 20). The chase moves it with `place`; C9 calls `skid`, and `update` plays the slide
  * and the fall. Nothing is allocated per frame.
  */
@@ -447,8 +448,9 @@ export class Motorbike {
     const tyre = m('#141414', 0.9);
     const chrome = m('#b9bec4', 0.3, 0.8);
     const paint = m('#9e1b22', 0.35, 0.3);
-    const jacket = m('#3a4654', 0.8);
-    const trousers = m('#33373d', 0.85);
+    // Sumit's navy check suit.
+    const jacket = m('#2a3550', 0.8);
+    const trousers = m('#2a3550', 0.85);
     const helmet = m('#161a20', 0.25, 0.2);
     const add = (g: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = this.body) => {
       const mesh = new THREE.Mesh(g, mat);

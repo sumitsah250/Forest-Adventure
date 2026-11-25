@@ -147,7 +147,14 @@ export class PhysicsWorld {
   }
 
   step(): void {
-    this.world.step(this.eventQueue);
+    // World.step() runs the pipeline and then World.mapNewSoftBodies(), which walks every collider and body
+    // handle through wasm↔JS calls to catch objects created inside wasm (torn soft bodies). With the campus's
+    // thousands of tree and building colliders that bookkeeping cost ~4 ms per step, more than the physics
+    // itself, and a slow frame runs several steps. Nothing here creates objects inside wasm: colliders and
+    // bodies are made and removed through the JS API, which keeps its own maps current. So step the
+    // pipeline directly.
+    const w = this.world;
+    w.physicsPipeline.step(w.gravity, w.integrationParameters, w.islands, w.broadPhase, w.narrowPhase, w.bodies, w.colliders, w.softBodies, w.impulseJoints, w.multibodyJoints, w.ccdSolver, this.eventQueue);
   }
 }
 

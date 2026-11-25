@@ -1,10 +1,11 @@
-// The player's own character: a skinned glTF (public/assets/models/player/
-// sumit_character.glb). Its own Idle / Walk / Run / Jump clips play while the
+// Skinned glTF characters (public/assets/models/player/): the player's own body
+// (survivor.glb, built by scripts/build-player-model.mjs) and any story character
+// whose outfit names a model (`outfit.model`, e.g. Sumit: sumit_character.glb).
+// A model's own Idle / Walk / Run / Jump clips, when it has them, play while the
 // player moves empty-handed; the game's procedural animator (the same one every
-// other humanoid uses) takes over for what the clips don't cover: weapon grips and
-// aiming, crouching, sitting in vehicles and kneeling.
+// other humanoid uses) drives everything else, and all of a model without clips.
 //
-// The model uses the game's bone names but its own proportions and a relaxed
+// Each model uses the game's bone names but its own proportions and a relaxed
 // A-pose. The animator expects identity bind rotations with every arm and leg
 // segment hanging straight down (-Y). So the rig is rebuilt in a "straightened"
 // bind pose: each limb segment keeps its modelled length but points straight
@@ -14,16 +15,20 @@
 // exactly: each bone's world rotation from the clip is multiplied by the inverse
 // of its straightening correction (see PlayerClips).
 //
-// If the file is missing or fails to load, the built-in procedural character is
-// used instead.
+// If a file is missing or fails to load, the built-in procedural character (from
+// the outfit) is used instead.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { assetUrl, shrinkTexture } from '../render/textures.ts';
-import { BONE_NAMES, BONE_PARENT, createHumanoid, type BoneName, type Humanoid, type Outfit } from './humanoid.ts';
+import { BONE_NAMES, BONE_PARENT, createHumanoid, type BoneName, type CharacterModel, type Humanoid, type Outfit } from './humanoid.ts';
+import { characterLit } from './characterLight.ts';
 
-const MODEL_URL = 'models/player/sumit_character.glb';
+const MODEL_URLS: Record<CharacterModel, string> = {
+  player: 'models/player/survivor.glb',
+  sumit: 'models/player/sumit_character.glb',
+};
 
 /** Limb segments straightened to point down: bone -> the child joint it reaches. */
 const LIMBS: Partial<Record<BoneName, BoneName>> = {
@@ -32,6 +37,8 @@ const LIMBS: Partial<Record<BoneName, BoneName>> = {
   'thigh.L': 'shin.L', 'shin.L': 'foot.L',
   'thigh.R': 'shin.R', 'shin.R': 'foot.R',
 };
+/** The survivor's near-black clothing materials (black jacket, jeans, shoes, gloves, pack). */
+const DARK_CLOTH = /^(Jacket|Jeans|Shoes|Gloves|Backpack)$/;
 /** Bones that keep the orientation they were modelled with (feet flat on the ground). */
 const KEEP = new Set<BoneName>(['foot.L', 'foot.R']);
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -50,22 +57,28 @@ interface Template {
   unbind: Record<BoneName, THREE.Quaternion>;
 }
 
-let template: Template | null = null;
-let loading: Promise<boolean> | null = null;
+const templates: Partial<Record<CharacterModel, Template>> = {};
+const loading: Partial<Record<CharacterModel, Promise<boolean>>> = {};
 
-/** Starts (once) loading the player's model. Resolves true when it is ready. */
-export function loadPlayerModel(): Promise<boolean> {
-  loading ??= new GLTFLoader()
-    .loadAsync(assetUrl(MODEL_URL))
+/** Starts (once) loading a character model. Resolves true when it is ready. */
+export function loadCharacterModel(id: CharacterModel): Promise<boolean> {
+  loading[id] ??= new GLTFLoader()
+    .loadAsync(assetUrl(MODEL_URLS[id]))
     .then((gltf) => {
-      template = buildTemplate(gltf.scene, gltf.animations);
+      // Story characters are seen from further away than the player: 512 px textures are plenty.
+      templates[id] = buildTemplate(gltf.scene, gltf.animations, id === 'player' ? undefined : 512);
       return true;
     })
     .catch((err: unknown) => {
-      console.warn('[player] Could not load the player model; using the built-in character.', err);
+      console.warn(`[character] Could not load the "${id}" model; using the built-in character.`, err);
       return false;
     });
-  return loading;
+  return loading[id];
+}
+
+/** Starts (once) loading the player's model. Resolves true when it is ready. */
+export function loadPlayerModel(): Promise<boolean> {
+  return loadCharacterModel('player');
 }
 
 /**
@@ -79,7 +92,7 @@ function boneName(loaded: string): BoneName {
   return n;
 }
 
-function buildTemplate(scene: THREE.Object3D, clips: THREE.AnimationClip[]): Template {
+function buildTemplate(scene: THREE.Object3D, clips: THREE.AnimationClip[], maxTexture?: number): Template {
   scene.updateMatrixWorld(true);
   const meshes: THREE.SkinnedMesh[] = [];
   scene.traverse((o) => {
@@ -158,6 +171,9 @@ function buildTemplate(scene: THREE.Object3D, clips: THREE.AnimationClip[]): Tem
   const geometry = mergeGeometries(geos, true);
   if (!geometry) throw new Error('player model primitives have mismatched attributes');
   for (const g of geos) g.dispose();
+  for (const side of ['L', 'R'] as const) {
+    tightenBend(geometry, order, restP, `thigh.${side}`, `shin.${side}`, 0.035, 0.045);
+  }
   // The armature (parent of the hips) is kept, bones only, to sample the clips on.
   const hips = skeleton.bones.find((b) => boneName(b.name) === 'hips')!;
   const armature = (hips.parent ?? hips).clone(false);
@@ -171,16 +187,86 @@ function buildTemplate(scene: THREE.Object3D, clips: THREE.AnimationClip[]): Tem
     const std = mat as THREE.MeshStandardMaterial;
     for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const) {
       const t = std[key];
-      if (t) shrinkTexture(t);
+      if (t) shrinkTexture(t, maxTexture);
     }
     if (std.map) std.map.anisotropy = 8;
+    // Readable after dark (characterLight.ts); the survivor's near-black outfit also takes the albedo lift.
+    characterLit(std, DARK_CLOTH.test(std.name));
   }
   return { geometry, materials, joints, order, boneInverses, armature, clips, unbind };
 }
 
+/**
+ * Re-splits the skin weights across a hinge joint (knee) so the bend happens in a
+ * short band around the joint. The source rigs fade thigh into shin over about 20 cm
+ * (Unreal-style rigs leave the rest to corrective bones the game doesn't drive), so a
+ * bent knee smeared the jeans between the two bones like rubber. Each vertex keeps its
+ * combined upper+lower weight; only the split between them changes, by the vertex's
+ * distance along the limb from the joint: all lower bone from `below` under it, all
+ * upper bone from `above` over it, smooth in between.
+ */
+function tightenBend(
+  geo: THREE.BufferGeometry, order: BoneName[], restP: Record<BoneName, THREE.Vector3>,
+  upper: BoneName, lower: BoneName, below: number, above: number,
+): void {
+  const iu = order.indexOf(upper);
+  const il = order.indexOf(lower);
+  if (iu < 0 || il < 0) return;
+  const joint = restP[lower];
+  const axis = restP[upper].clone().sub(joint).normalize();
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const si = geo.getAttribute('skinIndex') as THREE.BufferAttribute;
+  const sw = geo.getAttribute('skinWeight') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 1) {
+    let ku = -1;
+    let kl = -1;
+    let free = -1;
+    for (let k = 0; k < 4; k += 1) {
+      const b = si.getComponent(i, k);
+      const w = sw.getComponent(i, k);
+      if (w > 0 && b === iu) ku = k;
+      else if (w > 0 && b === il) kl = k;
+      else if (w <= 0 && free < 0) free = k;
+    }
+    if (ku < 0 && kl < 0) continue;
+    const total = (ku >= 0 ? sw.getComponent(i, ku) : 0) + (kl >= 0 ? sw.getComponent(i, kl) : 0);
+    const t = v.fromBufferAttribute(pos, i).sub(joint).dot(axis);
+    // Thigh-only vertices far above the knee (hip, buttock) and shin-only ones far below are left alone.
+    if (t > above * 3 || t < -below * 3) continue;
+    const x = THREE.MathUtils.clamp((t + below) / (above + below), 0, 1);
+    const up = total * x * x * (3 - 2 * x);
+    // A vertex that needs the other bone but has no slot free keeps its weights.
+    if (ku < 0 && up > 0) {
+      if (free < 0) continue;
+      ku = free;
+      si.setComponent(i, ku, iu);
+      free = -1;
+    }
+    if (kl < 0 && total - up > 0) {
+      if (free < 0) continue;
+      kl = free;
+      si.setComponent(i, kl, il);
+    }
+    if (ku >= 0) sw.setComponent(i, ku, up);
+    if (kl >= 0) sw.setComponent(i, kl, total - up);
+  }
+  si.needsUpdate = true;
+  sw.needsUpdate = true;
+}
+
 /** The player's character: the loaded model if ready, otherwise the built-in one. */
 export function createPlayerHumanoid(outfit: Outfit): Humanoid {
-  const t = template;
+  return createModelHumanoid('player', outfit);
+}
+
+/** Anyone's character: the model the outfit names (if loaded), otherwise the built-in one. */
+export function createCharacter(outfit: Outfit): Humanoid {
+  return outfit.model ? createModelHumanoid(outfit.model, outfit) : createHumanoid(outfit);
+}
+
+function createModelHumanoid(id: CharacterModel, outfit: Outfit): Humanoid {
+  const t = templates[id];
   if (!t) return createHumanoid(outfit);
   const bones = {} as Record<BoneName, THREE.Bone>;
   for (const name of BONE_NAMES) {
@@ -209,7 +295,7 @@ export function createPlayerHumanoid(outfit: Outfit): Humanoid {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.frustumCulled = false;
-  mesh.name = 'character-player-model';
+  mesh.name = id === 'player' ? 'character-player-model' : `character-model-${id}`;
   const root = new THREE.Group();
   root.add(mesh);
   return { root, mesh, bones, outfit, joints: t.joints };
@@ -306,7 +392,7 @@ export class PlayerClips {
 
   /** Clip player for a rig made by createPlayerHumanoid (null when it has no clips). */
   static create(rig: Humanoid): PlayerClips | null {
-    const t = template;
+    const t = templates.player;
     if (!t || !t.clips.length || rig.mesh.name !== 'character-player-model') return null;
     return new PlayerClips(rig, t);
   }

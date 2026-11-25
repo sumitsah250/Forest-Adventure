@@ -1,4 +1,4 @@
-// The shared shape of every mini-game (Bubble Level, Chiya Rush, Table Tennis, Drone Hack,
+// The shared shape of every mini-game (Bubble Level, Table Tennis, Drone Hack,
 // Pull-Start, Signal Tuner, Bug Hunt). Each runs inside the standard puzzle card (runMini in
 // ../minigames.ts), lasts 30 to 60 seconds, and reports a result.
 //

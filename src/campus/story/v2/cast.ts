@@ -8,8 +8,8 @@ import type { CastDef, NpcDef } from '../types.ts';
 export const CAST: Record<string, CastDef> = {
   player: { name: 'You', short: 'You', role: 'Fest volunteer', voice: 'Silent. Name and roll number are typed at the start; MITRA uses them.' },
   mitra: { name: 'MITRA', short: 'MITRA', role: 'Campus AI', voice: 'Missions 1-6 cold and bureaucratic with campus jokes; after 7 confused and honest; after 9 a dry, loyal ally.' },
-  asha: { name: 'Asha Gurung', short: 'Asha', role: 'Final-year Computer · built MITRA', suspect: true, voice: 'Fast and sarcastic. Radio partner in missions 1-6 and 8-10.' },
-  sunil: { name: 'Sunil Basnet', short: 'Sunil dai', role: 'Exam-server contractor', suspect: true, voice: 'Warm, helpful, over-explains. Likeable until mission 9. Radio partner in mission 7.' },
+  asha: { name: 'Asha Gurung', short: 'Asha', role: 'Final-year Computer · runs MITRA', suspect: true, voice: 'Fast and sarcastic. Radio partner in missions 1-6 and 8-10.' },
+  sumit: { name: 'Sumit', short: 'Sumit dai', role: 'MITRA\'s creator · WRC alumnus', suspect: true, voice: 'Warm, helpful, over-explains. Likeable until mission 9. Radio partner in mission 7.' },
   raju: { name: 'Raju', short: 'Raju', role: 'Batchmate · two back papers', suspect: true, voice: 'Jokes when nervous. Grey fest hoodie.' },
   krishna: { name: 'Krishna Dai', short: 'Krishna Dai', role: 'Cafeteria', voice: 'The witness. Plain and observant.' },
   bahadur: { name: 'Bahadur Dai', short: 'Bahadur Dai', role: 'Night guard', voice: 'Steady. Trusts his register.' },
@@ -27,7 +27,8 @@ const npc = (id: string, outfit: NpcDef['outfit'], at: NpcDef['at']): NpcDef => 
 /** The people who stand in the world, at their usual posts. A `talk` step with `at` moves one for a mission. */
 export const NPCS: NpcDef[] = [
   npc('asha', { ...base, id: 'bw-asha', skin: '#b58262', hair: '#120e0c', top: '#3d6b8a', topPattern: 'knit', trousers: '#2a3140', trouserPattern: 'denim', boots: '#ecebe6', headwear: 'none', backpack: '#6a2a3a', female: true, hairStyle: 'ponytail' }, { building: 'Research and Innovation Centre (RIC)' }),
-  npc('sunil', { ...base, id: 'v2-sunil', skin: '#a8724f', hair: '#1a1410', top: '#3a4654', topPattern: 'canvas', trousers: '#33373d', trouserPattern: 'twill', boots: '#1a1410', headwear: 'none', backpack: null, hairStyle: 'short' }, { point: 'Administration Block' }),
+  // Sumit wears his own model (sumit_character.glb: navy check suit, open white collar, beard); the outfit is its stand-in.
+  npc('sumit', { ...base, id: 'v2-sumit', model: 'sumit', skin: '#a97b63', hair: '#261c16', top: '#2a3550', topPattern: 'check', trousers: '#2a3550', trouserPattern: 'check', boots: '#0e0e0f', headwear: 'none', backpack: null, beard: true, suit: true }, { point: 'Administration Block' }),
   npc('raju', { ...base, id: 'v2-raju', skin: '#b07a58', hair: '#16110d', top: '#8d9299', topPattern: 'knit', trousers: '#2c3646', trouserPattern: 'denim', boots: '#e4e2dc', headwear: 'none', backpack: null, hairStyle: 'textured' }, { building: 'Table Tennis' }),
   npc('krishna', { ...base, id: 'bw-dai', skin: '#9c6a4c', hair: '#3a3530', top: '#e8e2d2', topPattern: 'canvas', trousers: '#3a3c40', trouserPattern: 'twill', boots: '#1a1410', headwear: 'cap', headwearColor: '#7a2a2a', backpack: null, beard: true }, { point: 'Cafeteria', outside: 'wall' }),
   npc('bahadur', { ...base, id: 'bw-guard', skin: '#a77352', hair: '#1a1410', top: '#2f3f2f', topPattern: 'canvas', trousers: '#2f3a2f', trouserPattern: 'twill', boots: '#121212', headwear: 'cap', headwearColor: '#1d2b1d', backpack: null, uniform: true }, { building: 'Hostel Guard Room' }),
@@ -40,10 +41,10 @@ export const NPCS: NpcDef[] = [
   npc('chief', STAFF.suitBrown, { point: 'WRC Auditorium', outside: 'wall', beside: 6 }),
 ];
 
-// Props over the outfits: Sunil's yellow contractor lanyard with the red pen drive (clue c1),
+// Props over the outfits: Sumit's yellow visitor lanyard with the red pen drive (clue c1),
 // Raju's grey fest hoodie.
 for (const n of NPCS) {
-  if (n.id === 'sunil') n.extras = ['lanyard'];
+  if (n.id === 'sumit') n.extras = ['lanyard'];
   if (n.id === 'raju') n.extras = ['hood'];
 }
 
@@ -51,6 +52,6 @@ for (const n of NPCS) {
 export const VOICES: Record<string, { name: string; role: string }> = {
   mitra: { name: 'MITRA', role: 'Campus AI' },
   asha: { name: 'Asha', role: 'on the radio' },
-  sunil: { name: 'Sunil dai', role: 'on the radio' },
+  sumit: { name: 'Sumit dai', role: 'on the radio' },
   chhetri: { name: 'Chhetri sir', role: 'on the radio' },
 };

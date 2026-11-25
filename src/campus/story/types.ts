@@ -90,7 +90,7 @@ export type Step =
   /** pursuer: a MITRA drone hunts Kalki; let it sit on you and you lose a heart. */
   | { kind: 'drive'; obj: string; route: Pt[]; time: number; pursuer?: boolean }
   /**
-   * bike: the target is Sunil's motorbike (mission 10). It is never caught: it stays at most 60 m
+   * bike: the target is Sumit's motorbike (mission 10). It is never caught: it stays at most 60 m
    * ahead, and the step ends when it reaches the end of the route (the main gate, then C9).
    * The main gate opens when a bike chase starts.
    */
@@ -144,7 +144,7 @@ export interface MissionDef {
 }
 
 export interface NpcDef {
-  /** Props worn over the outfit: a contractor's lanyard with a red pen drive, a hood. */
+  /** Props worn over the outfit: a visitor's lanyard with a red pen drive, a hood. */
   extras?: ('lanyard' | 'hood')[];
   id: string;
   name: string;
@@ -155,7 +155,7 @@ export interface NpcDef {
 
 // ------------------------------------------------------------------ V2 cast and clues
 
-export type Suspect = 'raju' | 'asha' | 'sunil';
+export type Suspect = 'raju' | 'asha' | 'sumit';
 
 export interface CastDef {
   /** Full name and the short form used on the radio. */

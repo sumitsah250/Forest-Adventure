@@ -38,13 +38,13 @@
 //   radioStatic arg cast id, over seconds  that radio portrait breaks into static (C5)
 //   silence     over seconds               nothing (a beat of quiet; music ducks in Phase 8)
 //   dronesBlue                             every drone eye turns blue (C6)
-//   bike        arg 'skid' | 'hide'        Sunil's motorbike skids and falls, or is removed
+//   bike        arg 'skid' | 'hide'        Sumit's motorbike skids and falls, or is removed
 //   sky         arg 'dusk' | 'night' | 'predawn' | 'dawn', over seconds (0: at once)
 //   clock       arg 'HH:MM|HH:MM', over s  a big clock spins from one time to the other (C8)
 //   rain        value 0..1, over seconds   rain strength, until the cutscene ends
 //   crowd       value count                students walk in through the main gate (C10)
 //   credits     over seconds               the credits roll (text in text.ts, ending.credits)
-// Entities: 'player', 'kart', 'gate', 'bike' (Sunil's motorbike) and 'npc:<id>'.
+// Entities: 'player', 'kart', 'gate', 'bike' (Sumit's motorbike) and 'npc:<id>'.
 // A skipped cutscene still runs every event, so the world always ends in the same state.
 //
 // All text is in text.ts. Check your shots with `npm run check:story`.
@@ -344,7 +344,7 @@ export const CUTSCENES: Partial<Record<CutsceneId, CutsceneDef>> = {
     ],
   },
 
-  // C9, mission 10 climax, 10 s: slow motion as Sunil's motorbike skids at the gate road, MITRA
+  // C9, mission 10 climax, 10 s: slow motion as Sumit's motorbike skids at the gate road, MITRA
   // swings the main gate shut in front of him, and Bahadur Dai steps out.
   C9: {
     shots: [

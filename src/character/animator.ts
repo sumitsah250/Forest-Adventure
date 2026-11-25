@@ -238,6 +238,10 @@ export class Animator {
       f.swing = false;
     }
     this.phase = 0.1;
+    // A fresh start on the ground: no fall or landing carried over.
+    this.air = 0;
+    this.landDip = 0;
+    this.landVel = 0;
     this.initialised = true;
   }
 
@@ -378,10 +382,12 @@ export class Animator {
     this.hipsY = THREE.MathUtils.damp(this.hipsY, hipY, 20, dt);
     const sway = Math.sin(this.phase * Math.PI * 2) * 0.025 * (1 - run) * Math.min(1, speed / 1.5);
     const hips = this.J('hips');
-    hips.bone.position.set(sway, this.hipsY, -this.lean.x * 0.15 - this.poseBlend.sit * 0.05);
+    // Crouching sits the hips back over the heels and tips the pelvis and torso forward over the
+    // knees (balanced, like a real crouch) instead of lowering an upright body onto bent legs.
+    hips.bone.position.set(sway, this.hipsY, -this.lean.x * 0.15 - this.poseBlend.sit * 0.05 - crouch * 0.09);
     hips.offset.copy(hips.bone.position);
     const hipYaw = Math.sin(this.phase * Math.PI * 2) * (0.07 + 0.05 * run) * Math.min(1, speed / 2);
-    const hipQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.lean.x * 0.25 - crouch * 0.15, hipYaw, this.lean.y - sway * 1.2, 'YXZ'));
+    const hipQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.lean.x * 0.25 + crouch * 0.22, hipYaw, this.lean.y - sway * 1.2, 'YXZ'));
     this.setRot('root', new THREE.Quaternion());
     this.J('root').p.set(0, 0, 0);
     this.setRot('hips', hipQ);
@@ -390,7 +396,7 @@ export class Animator {
     const breath = Math.sin(this.breathe * 1.6) * 0.012;
     const aimP = THREE.MathUtils.clamp(s.aimPitch, -1.1, 1.0) * s.aimAmount;
     const flinch = s.flinch;
-    const spinePitch = this.lean.x * 0.55 + crouch * 0.18 - aimP * 0.3 + flinch * 0.12;
+    const spinePitch = this.lean.x * 0.55 + crouch * 0.14 - aimP * 0.3 + flinch * 0.12;
     const chestPitch = this.lean.x * 0.3 + breath - aimP * 0.35 + flinch * 0.1;
     const counter = -hipYaw * 1.6;
     const kneel = this.poseBlend.surrender;
@@ -409,7 +415,7 @@ export class Animator {
     this.headPitch = THREE.MathUtils.damp(this.headPitch, wantPitch, 8, dt);
     const chestQ = this.J('chest').q;
     // Remove the chest's own pitch so the head pitch is relative to level.
-    const levelHead = new THREE.Quaternion().setFromEuler(new THREE.Euler(-this.headPitch * 0.5 - chestPitch * 0.4 - spinePitch * 0.4 - this.lean.x * 0.2, this.headYaw * 0.4 - counter * 0.3, 0, 'YXZ'));
+    const levelHead = new THREE.Quaternion().setFromEuler(new THREE.Euler(-this.headPitch * 0.5 - chestPitch * 0.4 - spinePitch * 0.4 - this.lean.x * 0.2 - crouch * 0.3, this.headYaw * 0.4 - counter * 0.3, 0, 'YXZ'));
     this.setRot('neck', levelHead.clone().premultiply(chestQ));
     this.setRot('head', new THREE.Quaternion().setFromEuler(new THREE.Euler(-this.headPitch * 0.5 + kneel * 0.15, this.headYaw * 0.6, 0, 'YXZ')).premultiply(this.J('neck').q));
 
